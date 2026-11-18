@@ -65,7 +65,7 @@ internal sealed class MainForm : Form
         flow.Controls.Add(map);
         flow.Controls.Add(new Label { Text = "UDP port (automatically selected when hosting):", AutoSize = true, Margin = new Padding(0,14,0,4) });
         flow.Controls.Add(hostPort);
-        flow.Controls.Add(Btn("Start LAN host", () => StartHost()));
+        flow.Controls.Add(Btn("Start host and open map in Studio", () => StartHost()));
         flow.Controls.Add(Btn("Stop host", () => StopHost()));
         flow.Controls.Add(endpoint);
         flow.Controls.Add(Btn("Find Roblox Studio", () => FindStudio()));
@@ -215,7 +215,7 @@ internal sealed class MainForm : Form
                     catch (Exception ex) { Log("Host error: " + ex.Message); }
                 }
             });
-            if (mapPath != null) Log("Map is selected locally. Open it in Studio to start your Roblox Studio test session.");
+            if (mapPath != null) { Log("Opening selected local place in Roblox Studio."); LaunchMapInStudio(); } else { Log("No place file selected. Choose a .rbxl/.rbxlx file, then open it in Studio."); }
         }
         catch (Exception ex) { Log("Could not start host: " + ex.Message); }
     }
@@ -274,10 +274,46 @@ internal sealed class MainForm : Form
     void OpenMap()
     {
         if (string.IsNullOrEmpty(mapPath) || !File.Exists(mapPath)) { MessageBox.Show("Choose a valid .rbxl or .rbxlx map first."); return; }
+        LaunchMapInStudio();
+    }
+
+    void LaunchMapInStudio()
+    {
+        if (string.IsNullOrWhiteSpace(mapPath) || !File.Exists(mapPath))
+        {
+            Log("No valid local place file selected.");
+            MessageBox.Show("Choose your .rbxl or .rbxlx place file first.");
+            return;
+        }
+        try
+        {
+            // Prefer Windows file association: Studio registers RBXL/RBXLX files.
+            Process.Start(new ProcessStartInfo(mapPath) { UseShellExecute = true });
+            Log("Opened local place file using its Windows file association: " + mapPath);
+            return;
+        }
+        catch (Exception associationError)
+        {
+            Log("Windows place-file association failed: " + associationError.Message);
+        }
+
         if (string.IsNullOrEmpty(studioPath) || !File.Exists(studioPath)) FindStudio();
-        if (studioPath == null) return;
-        try { Process.Start(new ProcessStartInfo(studioPath, $"\"{mapPath}\"") { UseShellExecute = true }); Log("Launched Roblox Studio with selected place file."); }
-        catch (Exception ex) { MessageBox.Show("Could not launch Studio: " + ex.Message); }
+        if (string.IsNullOrEmpty(studioPath)) return;
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = studioPath,
+                Arguments = "\"" + mapPath.Replace("\"", "\\\"") + "\"",
+                UseShellExecute = false
+            });
+            Log("Started Roblox Studio with selected local place file.");
+        }
+        catch (Exception ex)
+        {
+            Log("Could not open place in Studio: " + ex.Message);
+            MessageBox.Show("Could not open this place file in Roblox Studio. Try Studio > File > Open from File.\\n\\n" + ex.Message);
+        }
     }
     static string GetLanIp()
     {
