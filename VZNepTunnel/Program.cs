@@ -195,6 +195,12 @@ internal sealed class MainForm : Form
                 return;
             }
 
+            if (Process.GetProcessesByName("RobloxStudioBeta").Length > 0)
+            {
+                MessageBox.Show("Please save your work and close every Roblox Studio window first. VZ needs to install its Studio plugin before opening your selected place. Then click Host Session again.", "Close Roblox Studio first");
+                return;
+            }
+
             InstallPlugin();
             if (string.IsNullOrWhiteSpace(studioPath) || !File.Exists(studioPath)) FindStudio();
             if (string.IsNullOrWhiteSpace(studioPath)) return;
