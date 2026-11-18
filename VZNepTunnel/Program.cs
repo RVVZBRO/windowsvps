@@ -63,14 +63,11 @@ internal sealed class MainForm : Form
         flow.Controls.Add(new Label { Text = "Choose your Roblox place file (.rbxl / .rbxlx). It stays on this PC.", AutoSize = true });
         var map = Btn("Choose map…", () => ChooseMap());
         flow.Controls.Add(map);
-        flow.Controls.Add(new Label { Text = "UDP port (automatically selected when hosting):", AutoSize = true, Margin = new Padding(0,14,0,4) });
-        flow.Controls.Add(hostPort);
         flow.Controls.Add(Btn("Host selected map in Studio", () => StartHost()));
-        flow.Controls.Add(Btn("Stop host", () => StopHost()));
         flow.Controls.Add(endpoint);
         flow.Controls.Add(Btn("Find Roblox Studio", () => FindStudio()));
         flow.Controls.Add(Btn("Open selected map in Studio", () => OpenMap()));
-        flow.Controls.Add(new Label { Text = "Host opens the selected place in Studio. Use Plugins > VZ NepTunnel > Start local client session to launch a server and playable client window. This is a local Studio test, not an Internet join tunnel.", AutoSize = true, MaximumSize = new Size(780,0), ForeColor = Color.Khaki, Margin = new Padding(0,22,0,0) });
+        flow.Controls.Add(new Label { Text = "Host installs the VZ Studio plugin and opens your selected place. In Studio, click Plugins > VZ NepTunnel > Start local client session to launch one server and one playable client window. This is a local Studio test, not an Internet join tunnel.", AutoSize = true, MaximumSize = new Size(780,0), ForeColor = Color.Khaki, Margin = new Padding(0,22,0,0) });
         p.Controls.Add(flow); return p;
     }
 
@@ -197,33 +194,23 @@ internal sealed class MainForm : Form
                 MessageBox.Show("Choose a valid .rbxl or .rbxlx place file first.");
                 return;
             }
-            StopHost();
+
             InstallPlugin();
-            var udp = new UdpClient(new IPEndPoint(IPAddress.Any, 0));
-            host = udp; hostCts = new CancellationTokenSource();
-            hostPort.Value = ((IPEndPoint)udp.Client.LocalEndPoint!).Port;
-            var lan = GetLanIp();
-            endpoint.Text = $"LAN endpoint: {lan}:{hostPort.Value}";
-            Log($"LAN UDP host listening on {lan}:{hostPort.Value}");
-            _ = Task.Run(async () =>
-            {
-                while (!hostCts.IsCancellationRequested)
-                {
-                    try
-                    {
-                        var packet = await udp.ReceiveAsync(hostCts.Token);
-                        var bytes = Encoding.UTF8.GetBytes("VZ-NEPTUNNEL-OK");
-                        await udp.SendAsync(bytes, packet.RemoteEndPoint, hostCts.Token);
-                        Log($"UDP probe received from {packet.RemoteEndPoint}");
-                    }
-                    catch (OperationCanceledException) { break; }
-                    catch (ObjectDisposedException) { break; }
-                    catch (Exception ex) { Log("Host error: " + ex.Message); }
-                }
-            });
-            if (mapPath != null) { Log("Opening selected local place in Roblox Studio."); LaunchMapInStudio(); } else { Log("No place file selected. Choose a .rbxl/.rbxlx file, then open it in Studio."); }
+            if (string.IsNullOrWhiteSpace(studioPath) || !File.Exists(studioPath)) FindStudio();
+            if (string.IsNullOrWhiteSpace(studioPath)) return;
+
+            endpoint.Text = "Place opening in Roblox Studio — start the client test from Plugins.";
+            Log("VZ Studio plugin installed. Opening the selected local place.");
+            LaunchMapInStudio();
+            MessageBox.Show(
+                "Your local place is opening in Roblox Studio.\\n\\nIn Studio, click Plugins > VZ NepTunnel > Start local client session. This starts one local server and one playable client window.\\n\\nThis is Studio's local multiplayer test; it does not yet allow friends over the Internet.",
+                "VZ NepTunnel — Start client session");
         }
-        catch (Exception ex) { Log("Could not start host: " + ex.Message); }
+        catch (Exception ex)
+        {
+            Log("Could not prepare Studio host: " + ex.Message);
+            MessageBox.Show(ex.Message, "VZ NepTunnel");
+        }
     }
 
     void StopHost()
