@@ -9,6 +9,6 @@
     <RootNamespace>VZNepTunnel</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
-    <Content Include="../RobloxStudio/VZNepTunnelImporter.lua" Link="VZNepTunnelImporter.lua" CopyToOutputDirectory="PreserveNewest" />
+    <EmbeddedResource Include="../RobloxStudio/VZNepTunnelImporter.lua" LogicalName="VZNepTunnel.VZNepTunnelImporter.lua" />
   </ItemGroup>
 </Project>
