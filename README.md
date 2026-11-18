@@ -12,3 +12,10 @@ This build verifies Python syntax, PyInstaller packaging, and the resulting Wind
 Native .NET app branch: `vz-neptunnel-dotnet`. Build workflow: `.github/workflows/build-dotnet.yml`.
 
 Build validation pass after fixing C# compile errors.
+
+
+## Native VZ NepTunnel app additions
+- Hetzner Cloud API provisioning UI creates an Ubuntu relay VM and configures a UDP relay on port 45000. A Hetzner API token with Read & Write permission is required; server charges apply.
+- Relay room registration test supports host/join roles.
+- Roblox Studio importer plugin can be installed from the RBXM Importer tab. It uses StudioService's local file picker and temporary asset IDs.
+- The relay is currently a raw UDP room relay/probe, **not a complete transparent Roblox Studio port-forward/VPN**. Studio multiplayer traffic has not yet been wired through the relay.
