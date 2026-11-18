@@ -19,6 +19,11 @@ internal sealed class MainForm : Form
 {
     readonly TextBox log = new() { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill, BackColor = Color.FromArgb(18, 22, 31), ForeColor = Color.Gainsboro };
     readonly TextBox address = new() { Width = 300, PlaceholderText = "Friend's IP address" };
+    readonly TextBox relayIp = new() { Width = 300, PlaceholderText = "Relay server public IPv4" };
+    readonly TextBox roomCode = new() { Width = 300, PlaceholderText = "Shared room code (8+ characters)" };
+    readonly TextBox hetznerToken = new() { Width = 420, UseSystemPasswordChar = true, PlaceholderText = "Hetzner API token (Read & Write)" };
+    readonly ComboBox hetznerLocation = new() { Width = 180, DropDownStyle = ComboBoxStyle.DropDownList };
+    readonly ComboBox hetznerType = new() { Width = 180, DropDownStyle = ComboBoxStyle.DropDownList };
     readonly NumericUpDown hostPort = new() { Minimum = 1024, Maximum = 65535, Value = 53640, Width = 100 };
     readonly NumericUpDown joinPort = new() { Minimum = 1024, Maximum = 65535, Value = 53640, Width = 100 };
     readonly Label endpoint = new() { AutoSize = true, ForeColor = Color.LightGreen };
@@ -38,6 +43,7 @@ internal sealed class MainForm : Form
         tabs.TabPages.Add(JoinPage());
         tabs.TabPages.Add(ImporterPage());
         tabs.TabPages.Add(LogsPage());
+        tabs.TabPages.Add(CloudPage());
         Controls.Add(tabs);
         Log("VZ NepTunnel started. LAN UDP testing is available; public Internet tunnelling requires a configured relay VPS.");
         FormClosing += (_, _) => StopHost();
@@ -75,7 +81,11 @@ internal sealed class MainForm : Form
         flow.Controls.Add(new Label { Text = "Enter the host's LAN IP address and UDP port:", AutoSize = true });
         flow.Controls.Add(address);
         flow.Controls.Add(joinPort);
-        flow.Controls.Add(Btn("Send connection test", async () => await SendTest()));
+        flow.Controls.Add(Btn("Send LAN connection test", async () => await SendTest()));
+        flow.Controls.Add(new Label { Text = "Public relay connection test:", AutoSize = true, Margin = new Padding(0,18,0,4) });
+        flow.Controls.Add(relayIp);
+        flow.Controls.Add(roomCode);
+        flow.Controls.Add(Btn("Test relay registration", async () => await TestRelay()));
         flow.Controls.Add(new Label { Text = "Both PCs must be on the same reachable network for this LAN test. Internet joining needs a relay VPS.", AutoSize = true, MaximumSize = new Size(760,0), ForeColor = Color.Khaki, Margin = new Padding(0,16,0,0) });
         p.Controls.Add(flow); return p;
     }
@@ -89,10 +99,84 @@ internal sealed class MainForm : Form
         top.Controls.Add(Heading("RBXM assets"));
         top.Controls.Add(Btn("Add .rbxm files…", () => AddAssets()));
         top.Controls.Add(Btn("Open selected file", () => OpenSelectedAsset()));
+        top.Controls.Add(Btn("Install Studio importer plugin", () => InstallPlugin()));
         split.Controls.Add(top,0,0); split.Controls.Add(imports,0,1); p.Controls.Add(split); return p;
     }
 
     TabPage LogsPage() { var p = Page("Activity"); p.Controls.Add(log); return p; }
+
+
+    TabPage CloudPage()
+    {
+        var p = Page("VPS Relay");
+        var flow = new FlowLayoutPanel { Dock = DockStyle.Top, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true };
+        flow.Controls.Add(Heading("Create your VZ relay VPS"));
+        flow.Controls.Add(new Label { Text = "Paste a Hetzner Cloud API token with Read & Write permission. The token is used only for this request and is not saved.", AutoSize = true, MaximumSize = new Size(760,0) });
+        flow.Controls.Add(hetznerToken);
+        hetznerLocation.Items.AddRange(new object[] { "fsn1", "nbg1", "hel1", "ash", "hil", "sin" }); hetznerLocation.SelectedIndex = 0;
+        hetznerType.Items.AddRange(new object[] { "cx22", "cpx22", "cpx32" }); hetznerType.SelectedIndex = 0;
+        flow.Controls.Add(new Label { Text = "Location:", AutoSize = true }); flow.Controls.Add(hetznerLocation);
+        flow.Controls.Add(new Label { Text = "Server type (Hetzner billing applies):", AutoSize = true }); flow.Controls.Add(hetznerType);
+        flow.Controls.Add(Btn("Create UDP relay VPS", async () => await CreateRelayVps()));
+        flow.Controls.Add(new Label { Text = "The VPS installs a UDP relay on port 45000. This creates relay infrastructure; it does not automatically route Roblox Studio's full multiplayer traffic yet.", AutoSize = true, MaximumSize = new Size(760,0), ForeColor = Color.Khaki, Margin = new Padding(0,18,0,0) });
+        p.Controls.Add(flow); return p;
+    }
+
+    async Task CreateRelayVps()
+    {
+        try
+        {
+            UseWaitCursor = true;
+            var result = await new HetznerProvisioner().CreateRelayAsync(hetznerToken.Text, hetznerLocation.Text, hetznerType.Text);
+            relayIp.Text = result.ip;
+            Log($"Hetzner relay server created: ID {result.id}, IP {result.ip}. Allow several minutes for cloud-init.");
+            MessageBox.Show($"Relay VPS created!\\nIP: {result.ip}\\nUDP port: 45000\\nServer ID: {result.id}\\n\\nHetzner charges your account for this server.", "VZ NepTunnel");
+        }
+        catch (Exception ex) { Log("VPS provisioning failed: " + ex.Message); MessageBox.Show(ex.Message, "Hetzner provisioning"); }
+        finally { UseWaitCursor = false; }
+    }
+
+    async Task TestRelay()
+    {
+        try
+        {
+            var ip = IPAddress.Parse(relayIp.Text.Trim());
+            if (roomCode.Text.Trim().Length < 8) throw new ArgumentException("Room code must be at least 8 characters.");
+            using var udp = new UdpClient();
+            var ep = new IPEndPoint(ip, 45000);
+            var payload = Encoding.UTF8.GetBytes("VZ1|" + roomCode.Text.Trim() + "|host");
+            for (int i = 0; i < 5; i++)
+            {
+                await udp.SendAsync(payload, ep);
+                var receive = udp.ReceiveAsync();
+                if (await Task.WhenAny(receive, Task.Delay(700)) == receive)
+                {
+                    var response = Encoding.UTF8.GetString((await receive).Buffer);
+                    Log("Relay response: " + response);
+                    MessageBox.Show("Relay responded: " + response + "\\nA peer must register in the same room to exchange traffic.");
+                    return;
+                }
+            }
+            throw new TimeoutException("No relay response. Check VPS cloud-init and UDP port 45000 firewall.");
+        }
+        catch (Exception ex) { Log("Relay test failed: " + ex.Message); MessageBox.Show(ex.Message, "Relay test"); }
+    }
+
+    void InstallPlugin()
+    {
+        try
+        {
+            var source = Path.Combine(AppContext.BaseDirectory, "VZNepTunnelImporter.lua");
+            if (!File.Exists(source)) throw new FileNotFoundException("Plugin file was not included with this app build.", source);
+            var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Roblox", "Plugins");
+            Directory.CreateDirectory(folder);
+            var target = Path.Combine(folder, "VZNepTunnelImporter.lua");
+            File.Copy(source, target, true);
+            Log("Installed Roblox Studio plugin: " + target);
+            MessageBox.Show("VZ importer plugin installed. Restart Roblox Studio to see it in Plugins.");
+        }
+        catch (Exception ex) { MessageBox.Show(ex.Message, "Plugin installation"); }
+    }
 
     void ChooseMap()
     {
