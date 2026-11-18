@@ -19,3 +19,5 @@ Build validation pass after fixing C# compile errors.
 - Relay room registration test supports host/join roles.
 - Roblox Studio importer plugin can be installed from the RBXM Importer tab. It uses StudioService's local file picker and temporary asset IDs.
 - The relay is currently a raw UDP room relay/probe, **not a complete transparent Roblox Studio port-forward/VPN**. Studio multiplayer traffic has not yet been wired through the relay.
+
+The Studio importer plugin is embedded in the standalone executable so the EXE is self-contained.
