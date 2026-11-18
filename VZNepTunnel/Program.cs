@@ -24,6 +24,7 @@ internal sealed class MainForm : Form
     readonly TextBox hetznerToken = new() { Width = 420, UseSystemPasswordChar = true, PlaceholderText = "Hetzner API token (Read & Write)" };
     readonly ComboBox hetznerLocation = new() { Width = 180, DropDownStyle = ComboBoxStyle.DropDownList };
     readonly ComboBox hetznerType = new() { Width = 180, DropDownStyle = ComboBoxStyle.DropDownList };
+    readonly ComboBox relayRole = new() { Width = 140, DropDownStyle = ComboBoxStyle.DropDownList };
     readonly NumericUpDown hostPort = new() { Minimum = 1024, Maximum = 65535, Value = 53640, Width = 100 };
     readonly NumericUpDown joinPort = new() { Minimum = 1024, Maximum = 65535, Value = 53640, Width = 100 };
     readonly Label endpoint = new() { AutoSize = true, ForeColor = Color.LightGreen };
@@ -85,6 +86,8 @@ internal sealed class MainForm : Form
         flow.Controls.Add(new Label { Text = "Public relay connection test:", AutoSize = true, Margin = new Padding(0,18,0,4) });
         flow.Controls.Add(relayIp);
         flow.Controls.Add(roomCode);
+        relayRole.Items.AddRange(new object[] { "host", "join" }); relayRole.SelectedIndex = 0;
+        flow.Controls.Add(relayRole);
         flow.Controls.Add(Btn("Test relay registration", async () => await TestRelay()));
         flow.Controls.Add(new Label { Text = "Both PCs must be on the same reachable network for this LAN test. Internet joining needs a relay VPS.", AutoSize = true, MaximumSize = new Size(760,0), ForeColor = Color.Khaki, Margin = new Padding(0,16,0,0) });
         p.Controls.Add(flow); return p;
@@ -144,7 +147,7 @@ internal sealed class MainForm : Form
             if (roomCode.Text.Trim().Length < 8) throw new ArgumentException("Room code must be at least 8 characters.");
             using var udp = new UdpClient();
             var ep = new IPEndPoint(ip, 45000);
-            var payload = Encoding.UTF8.GetBytes("VZ1|" + roomCode.Text.Trim() + "|host");
+            var payload = Encoding.UTF8.GetBytes("VZ1|" + roomCode.Text.Trim() + "|" + relayRole.Text);
             for (int i = 0; i < 5; i++)
             {
                 await udp.SendAsync(payload, ep);
