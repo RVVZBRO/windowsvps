@@ -21,3 +21,12 @@ Build validation pass after fixing C# compile errors.
 - The relay is currently a raw UDP room relay/probe, **not a complete transparent Roblox Studio port-forward/VPN**. Studio multiplayer traffic has not yet been wired through the relay.
 
 The Studio importer plugin is embedded in the standalone executable so the EXE is self-contained.
+
+
+## Host a local Roblox Studio client session
+1. Close all running Roblox Studio windows before clicking Host Session (so the plugin can load).
+2. In VZ NepTunnel, choose a local `.rbxl` or `.rbxlx` file and click **Host selected map in Studio**.
+3. VZ installs `VZNepTunnelHost.lua` into `%LOCALAPPDATA%\\Roblox\\Plugins` and opens the selected local place using Studio's documented `--task EditFile --localPlaceFile` command-line options.
+4. In Studio, click **Plugins > VZ NepTunnel > Start local client session**. The plugin calls `StudioTestService:ExecuteMultiplayerTestAsync(1, ...)`, which starts one local server and one playable client simulation. End it with Studio's End Session control.
+
+This is a local Studio server/client test workflow. It does **not** yet tunnel the live Studio server traffic to remote friends over the Internet. The Hetzner UDP relay is only a separate relay/probe component at this stage.
