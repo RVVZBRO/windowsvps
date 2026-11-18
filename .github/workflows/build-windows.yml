@@ -1,0 +1,43 @@
+name: VZ NepTunnel Windows build
+on:
+  push:
+    branches: [vz-neptunnel-build]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Restore application source
+        shell: pwsh
+        run: |
+          $bytes = [Convert]::FromBase64String((Get-Content .build/main.py.gz.b64 -Raw))
+          [IO.File]::WriteAllBytes('main.py.gz', $bytes)
+          python -c "import gzip; open('main.py','wb').write(gzip.decompress(open('main.py.gz','rb').read()))"
+          Remove-Item main.py.gz
+          python -m py_compile main.py
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Package Windows executable
+        run: pyinstaller --noconfirm --clean --onefile --windowed --name "VZ NepTunnel" --collect-all customtkinter main.py
+      - name: Verify executable artifact
+        shell: pwsh
+        run: |
+          $exe = Get-Item "dist/VZ NepTunnel.exe"
+          if ($exe.Length -lt 1000000) { throw "EXE is unexpectedly small: $($exe.Length) bytes" }
+          $stream = [IO.File]::OpenRead($exe.FullName)
+          try { $b = New-Object byte[] 2; [void]$stream.Read($b,0,2); if ($b[0] -ne 0x4D -or $b[1] -ne 0x5A) { throw "Not a Windows PE executable" } } finally { $stream.Dispose() }
+          Write-Host "Built $($exe.Name), $($exe.Length) bytes"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VZ-NepTunnel-Windows-x64
+          path: dist/VZ NepTunnel.exe
+          if-no-files-found: error
+          retention-days: 30
