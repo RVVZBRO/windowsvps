@@ -1,26 +1,40 @@
--- VZ NepTunnel RBXM importer plugin
--- Install this file in %LOCALAPPDATA%\Roblox\Plugins and restart Studio.
-local StudioService = game:GetService("StudioService")
-local Selection = game:GetService("Selection")
-local toolbar = plugin:CreateToolbar("VZ NepTunnel")
-local button = toolbar:CreateButton("VZImportRBXM", "Import a local RBXM/RBXMX file into the open place", "")
-button.ClickableWhenViewportHidden = true
+-- VZ NepTunnel Studio host plugin
+-- Starts a real Studio server + client test for the currently open local place.
+-- Install at %LOCALAPPDATA%\Roblox\Plugins\VZNepTunnelHost.lua
+local StudioTestService = game:GetService("StudioTestService")
 
-button.Click:Connect(function()
-	local ok, file = pcall(function()
-		return StudioService:PromptImportFileAsync({"rbxm", "rbxmx"})
-	end)
-	if not ok then warn("[VZ NepTunnel] File picker failed: " .. tostring(file)); return end
-	if not file then return end
-	local success, objects = pcall(function()
-		return game:GetObjects(file:GetTemporaryId())
-	end)
-	if not success or not objects or #objects == 0 then
-		warn("[VZ NepTunnel] Studio could not decode this model file. Try Explorer > Insert from File.")
-		return
-	end
-	local parent = game:GetService("Workspace")
-	for _, object in ipairs(objects) do object.Parent = parent end
-	Selection:Set(objects)
-	print("[VZ NepTunnel] Imported " .. file.Name .. " into Workspace.")
+local toolbar = plugin:CreateToolbar("VZ NepTunnel")
+local startButton = toolbar:CreateButton(
+    "VZHostSession",
+    "Start a local server and a playable client window for this place",
+    ""
+)
+startButton.ClickableWhenViewportHidden = true
+
+local running = false
+startButton.Click:Connect(function()
+    if running then
+        warn("[VZ NepTunnel] A Studio test session is already running. Use Studio's End Session button to stop it.")
+        return
+    end
+
+    running = true
+    startButton.Enabled = false
+    task.spawn(function()
+        local ok, result = pcall(function()
+            -- One local server and one client. Studio opens the client play window.
+            return StudioTestService:ExecuteMultiplayerTestAsync(1, "VZ NepTunnel local host")
+        end)
+
+        if not ok then
+            warn("[VZ NepTunnel] Could not start Studio client/server test: " .. tostring(result))
+        else
+            print("[VZ NepTunnel] Studio test session ended: " .. tostring(result))
+        end
+
+        running = false
+        startButton.Enabled = true
+    end)
 end)
+
+print("[VZ NepTunnel] Ready. Open the Plugins tab and click VZ NepTunnel > Start local client session.")
