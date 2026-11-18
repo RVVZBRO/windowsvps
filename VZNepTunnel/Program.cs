@@ -57,7 +57,7 @@ internal sealed class MainForm : Form
         var map = Btn("Choose map…", () => ChooseMap());
         flow.Controls.Add(map);
         flow.Controls.Add(new Label { Text = "UDP port (automatically selected when hosting):", AutoSize = true, Margin = new Padding(0,14,0,4) });
-        flow.Controls.Add(port);
+        flow.Controls.Add(hostPort);
         flow.Controls.Add(Btn("Start LAN host", () => StartHost()));
         flow.Controls.Add(Btn("Stop host", () => StopHost()));
         flow.Controls.Add(endpoint);
@@ -74,7 +74,7 @@ internal sealed class MainForm : Form
         flow.Controls.Add(Heading("Join a session"));
         flow.Controls.Add(new Label { Text = "Enter the host's LAN IP address and UDP port:", AutoSize = true });
         flow.Controls.Add(address);
-        flow.Controls.Add(port);
+        flow.Controls.Add(joinPort);
         flow.Controls.Add(Btn("Send connection test", async () => await SendTest()));
         flow.Controls.Add(new Label { Text = "Both PCs must be on the same reachable network for this LAN test. Internet joining needs a relay VPS.", AutoSize = true, MaximumSize = new Size(760,0), ForeColor = Color.Khaki, Margin = new Padding(0,16,0,0) });
         p.Controls.Add(flow); return p;
