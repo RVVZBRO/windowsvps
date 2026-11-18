@@ -10,3 +10,5 @@ This build verifies Python syntax, PyInstaller packaging, and the resulting Wind
 
 
 Native .NET app branch: `vz-neptunnel-dotnet`. Build workflow: `.github/workflows/build-dotnet.yml`.
+
+Build validation pass after fixing C# compile errors.
