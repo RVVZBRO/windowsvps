@@ -16,7 +16,12 @@ jobs:
       - name: Restore application source
         shell: pwsh
         run: |
-          python -c "import base64,gzip,pathlib; pathlib.Path('main.py').write_bytes(gzip.decompress(base64.b64decode(pathlib.Path('.build/main.py.gz.b64').read_text())))"
+          $parts = @('.build/chunk1.txt', '.build/chunk2.txt')
+          $encoded = ($parts | ForEach-Object { (Get-Content $_ -Raw).Trim() }) -join ''
+          $compressed = [Convert]::FromBase64String($encoded)
+          $source = [IO.Compression.GzipStream]::new([IO.MemoryStream]::new($compressed), [IO.Compression.CompressionMode]::Decompress)
+          $output = [IO.File]::Create('main.py')
+          try { $source.CopyTo($output) } finally { $output.Dispose(); $source.Dispose() }
           python -m py_compile main.py
       - name: Install dependencies
         run: |
