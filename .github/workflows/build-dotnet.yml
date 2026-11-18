@@ -1,0 +1,24 @@
+name: Build VZ NepTunnel
+on:
+  push:
+    branches: [vz-neptunnel-dotnet]
+  workflow_dispatch:
+permissions:
+  contents: read
+actions: read
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Publish self-contained Windows executable
+        run: dotnet publish VZNepTunnel/VZNepTunnel.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VZ-NepTunnel-Windows-x64
+          path: publish/VZ NepTunnel.exe
+          if-no-files-found: error
+          retention-days: 30
