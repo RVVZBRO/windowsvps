@@ -19,7 +19,8 @@ internal sealed class MainForm : Form
 {
     readonly TextBox log = new() { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill, BackColor = Color.FromArgb(18, 22, 31), ForeColor = Color.Gainsboro };
     readonly TextBox address = new() { Width = 300, PlaceholderText = "Friend's IP address" };
-    readonly NumericUpDown port = new() { Minimum = 1024, Maximum = 65535, Value = 53640, Width = 100 };
+    readonly NumericUpDown hostPort = new() { Minimum = 1024, Maximum = 65535, Value = 53640, Width = 100 };
+    readonly NumericUpDown joinPort = new() { Minimum = 1024, Maximum = 65535, Value = 53640, Width = 100 };
     readonly Label endpoint = new() { AutoSize = true, ForeColor = Color.LightGreen };
     readonly ListBox imports = new() { Dock = DockStyle.Fill, BackColor = Color.FromArgb(18,22,31), ForeColor = Color.White };
     UdpClient? host;
@@ -45,7 +46,7 @@ internal sealed class MainForm : Form
     TabPage Page(string title) { var p = new TabPage(title) { BackColor = BackColor, ForeColor = ForeColor, Padding = new Padding(18) }; return p; }
     Button Btn(string text, Action action) { var b = new Button { Text = text, AutoSize = true, Padding = new Padding(12,7,12,7), BackColor = Color.FromArgb(49,93,160), ForeColor = Color.White, FlatStyle = FlatStyle.Flat }; b.Click += (_,_) => action(); return b; }
     Label Heading(string s) => new() { Text = s, AutoSize = true, Font = new Font("Segoe UI", 19, FontStyle.Bold), ForeColor = Color.White, Margin = new Padding(0,0,0,16) };
-    void Log(string s) { if (log.InvokeRequired) { log.BeginInvoke(() => Log(s)); return; } log.AppendText($"[{DateTime.Now:HH:mm:ss}] {s}{Environment.NewLine}"); }
+    void Log(string s) { if (log.InvokeRequired) { log.BeginInvoke(new Action(() => Log(s))); return; } log.AppendText($"[{DateTime.Now:HH:mm:ss}] {s}{Environment.NewLine}"); }
 
     TabPage HomePage()
     {
@@ -106,10 +107,10 @@ internal sealed class MainForm : Form
             StopHost();
             var udp = new UdpClient(new IPEndPoint(IPAddress.Any, 0));
             host = udp; hostCts = new CancellationTokenSource();
-            port.Value = ((IPEndPoint)udp.Client.LocalEndPoint!).Port;
+            hostPort.Value = ((IPEndPoint)udp.Client.LocalEndPoint!).Port;
             var lan = GetLanIp();
-            endpoint.Text = $"LAN endpoint: {lan}:{port.Value}";
-            Log($"LAN UDP host listening on {lan}:{port.Value}");
+            endpoint.Text = $"LAN endpoint: {lan}:{hostPort.Value}";
+            Log($"LAN UDP host listening on {lan}:{hostPort.Value}");
             _ = Task.Run(async () =>
             {
                 while (!hostCts.IsCancellationRequested)
@@ -145,7 +146,7 @@ internal sealed class MainForm : Form
             using var udp = new UdpClient();
             udp.Client.ReceiveTimeout = 3000;
             var ip = IPAddress.Parse(address.Text.Trim());
-            var ep = new IPEndPoint(ip, (int)port.Value);
+            var ep = new IPEndPoint(ip, (int)joinPort.Value);
             var bytes = Encoding.UTF8.GetBytes("VZ-NEPTUNNEL-PING");
             await udp.SendAsync(bytes, ep);
             var receive = udp.ReceiveAsync();
