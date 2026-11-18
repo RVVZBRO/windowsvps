@@ -49,6 +49,7 @@ runcmd:
   - printf '[Unit]\nDescription=VZ UDP relay\nAfter=network-online.target\n[Service]\nExecStart=/usr/local/bin/vz-relay\nRestart=always\n[Install]\nWantedBy=multi-user.target\n' > /etc/systemd/system/vz-relay.service
   - systemctl daemon-reload
   - systemctl enable --now vz-relay
+  - ufw allow OpenSSH
   - ufw allow 45000/udp
   - ufw --force enable
 ";
