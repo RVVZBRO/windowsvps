@@ -16,10 +16,7 @@ jobs:
       - name: Restore application source
         shell: pwsh
         run: |
-          $bytes = [Convert]::FromBase64String((Get-Content .build/main.py.gz.b64 -Raw))
-          [IO.File]::WriteAllBytes('main.py.gz', $bytes)
-          python -c "import gzip; open('main.py','wb').write(gzip.decompress(open('main.py.gz','rb').read()))"
-          Remove-Item main.py.gz
+          python -c "import base64,gzip,pathlib; pathlib.Path('main.py').write_bytes(gzip.decompress(base64.b64decode(pathlib.Path('.build/main.py.gz.b64').read_text())))"
           python -m py_compile main.py
       - name: Install dependencies
         run: |
