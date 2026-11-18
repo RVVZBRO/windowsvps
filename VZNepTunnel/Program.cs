@@ -65,12 +65,12 @@ internal sealed class MainForm : Form
         flow.Controls.Add(map);
         flow.Controls.Add(new Label { Text = "UDP port (automatically selected when hosting):", AutoSize = true, Margin = new Padding(0,14,0,4) });
         flow.Controls.Add(hostPort);
-        flow.Controls.Add(Btn("Start host and open map in Studio", () => StartHost()));
+        flow.Controls.Add(Btn("Host selected map in Studio", () => StartHost()));
         flow.Controls.Add(Btn("Stop host", () => StopHost()));
         flow.Controls.Add(endpoint);
         flow.Controls.Add(Btn("Find Roblox Studio", () => FindStudio()));
         flow.Controls.Add(Btn("Open selected map in Studio", () => OpenMap()));
-        flow.Controls.Add(new Label { Text = "Important: this build provides LAN UDP hosting/testing only. It does not yet create a public VPS tunnel or a shareable Internet address.", AutoSize = true, MaximumSize = new Size(780,0), ForeColor = Color.Khaki, Margin = new Padding(0,22,0,0) });
+        flow.Controls.Add(new Label { Text = "Host opens the selected place in Studio. Use Plugins > VZ NepTunnel > Start local client session to launch a server and playable client window. This is a local Studio test, not an Internet join tunnel.", AutoSize = true, MaximumSize = new Size(780,0), ForeColor = Color.Khaki, Margin = new Padding(0,22,0,0) });
         p.Controls.Add(flow); return p;
     }
 
@@ -171,13 +171,13 @@ internal sealed class MainForm : Form
         {
             var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Roblox", "Plugins");
             Directory.CreateDirectory(folder);
-            var target = Path.Combine(folder, "VZNepTunnelImporter.lua");
+            var target = Path.Combine(folder, "VZNepTunnelHost.lua");
             using var resource = System.Reflection.Assembly.GetExecutingAssembly().GetManifestResourceStream("VZNepTunnel.VZNepTunnelImporter.lua");
             if (resource == null) throw new FileNotFoundException("The Studio importer plugin is missing from this app build.");
             using var output = File.Create(target);
             resource.CopyTo(output);
             Log("Installed Roblox Studio plugin: " + target);
-            MessageBox.Show("VZ importer plugin installed. Restart Roblox Studio to see it in Plugins.");
+            MessageBox.Show("VZ Studio host plugin installed. If Roblox Studio is already open, close and reopen it. Then open Plugins > VZ NepTunnel > Start local client session.");
         }
         catch (Exception ex) { MessageBox.Show(ex.Message, "Plugin installation"); }
     }
@@ -192,7 +192,13 @@ internal sealed class MainForm : Form
     {
         try
         {
+            if (string.IsNullOrWhiteSpace(mapPath) || !File.Exists(mapPath))
+            {
+                MessageBox.Show("Choose a valid .rbxl or .rbxlx place file first.");
+                return;
+            }
             StopHost();
+            InstallPlugin();
             var udp = new UdpClient(new IPEndPoint(IPAddress.Any, 0));
             host = udp; hostCts = new CancellationTokenSource();
             hostPort.Value = ((IPEndPoint)udp.Client.LocalEndPoint!).Port;
@@ -285,29 +291,19 @@ internal sealed class MainForm : Form
             MessageBox.Show("Choose your .rbxl or .rbxlx place file first.");
             return;
         }
-        try
-        {
-            // Prefer Windows file association: Studio registers RBXL/RBXLX files.
-            Process.Start(new ProcessStartInfo(mapPath) { UseShellExecute = true });
-            Log("Opened local place file using its Windows file association: " + mapPath);
-            return;
-        }
-        catch (Exception associationError)
-        {
-            Log("Windows place-file association failed: " + associationError.Message);
-        }
-
         if (string.IsNullOrEmpty(studioPath) || !File.Exists(studioPath)) FindStudio();
         if (string.IsNullOrEmpty(studioPath)) return;
         try
         {
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = studioPath,
-                Arguments = "\"" + mapPath.Replace("\"", "\\\"") + "\"",
-                UseShellExecute = false
-            });
-            Log("Started Roblox Studio with selected local place file.");
+            // Documented Roblox Studio CLI syntax for opening a local place file.
+            var start = new ProcessStartInfo { FileName = studioPath, UseShellExecute = false };
+            start.ArgumentList.Add("--task");
+            start.ArgumentList.Add("EditFile");
+            start.ArgumentList.Add("--localPlaceFile");
+            start.ArgumentList.Add(mapPath);
+            Process.Start(start);
+            Log("Opened local place in Roblox Studio using --task EditFile --localPlaceFile.");
+            Log("In Studio, choose Plugins > VZ NepTunnel > Start local client session.");
         }
         catch (Exception ex)
         {
