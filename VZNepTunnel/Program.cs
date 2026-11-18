@@ -28,6 +28,8 @@ internal sealed class MainForm : Form
     readonly NumericUpDown hostPort = new() { Minimum = 1024, Maximum = 65535, Value = 53640, Width = 100 };
     readonly NumericUpDown joinPort = new() { Minimum = 1024, Maximum = 65535, Value = 53640, Width = 100 };
     readonly Label endpoint = new() { AutoSize = true, ForeColor = Color.LightGreen };
+    readonly Label hostStatus = new() { AutoSize = true, ForeColor = Color.Orange, Font = new Font("Segoe UI", 12, FontStyle.Bold), Text = "NOT HOSTED" };
+    readonly Label configuredPort = new() { AutoSize = true, ForeColor = Color.Gainsboro };
     readonly ListBox imports = new() { Dock = DockStyle.Fill, BackColor = Color.FromArgb(18,22,31), ForeColor = Color.White };
     UdpClient? host;
     CancellationTokenSource? hostCts;
@@ -63,11 +65,18 @@ internal sealed class MainForm : Form
         flow.Controls.Add(new Label { Text = "Choose your Roblox place file (.rbxl / .rbxlx). It stays on this PC.", AutoSize = true });
         var map = Btn("Choose map…", () => ChooseMap());
         flow.Controls.Add(map);
+        flow.Controls.Add(new Label { Text = "Session status:", AutoSize = true });
+        flow.Controls.Add(hostStatus);
+        flow.Controls.Add(new Label { Text = "Configured port (not proof of a running game server):", AutoSize = true });
+        flow.Controls.Add(hostPort);
+        flow.Controls.Add(configuredPort);
         flow.Controls.Add(Btn("Host selected map in Studio", () => StartHost()));
         flow.Controls.Add(endpoint);
         flow.Controls.Add(Btn("Find Roblox Studio", () => FindStudio()));
         flow.Controls.Add(Btn("Open selected map in Studio", () => OpenMap()));
         flow.Controls.Add(new Label { Text = "Host installs the VZ Studio plugin and opens your selected place. In Studio, click Plugins > VZ NepTunnel > Start local client session to launch one server and one playable client window. This is a local Studio test, not an Internet join tunnel.", AutoSize = true, MaximumSize = new Size(780,0), ForeColor = Color.Khaki, Margin = new Padding(0,22,0,0) });
+        configuredPort.Text = $"Configured port: {(int)hostPort.Value}";
+        hostPort.ValueChanged += (_, _) => configuredPort.Text = $"Configured port: {(int)hostPort.Value}";
         p.Controls.Add(flow); return p;
     }
 
@@ -130,7 +139,7 @@ internal sealed class MainForm : Form
             var result = await new HetznerProvisioner().CreateRelayAsync(hetznerToken.Text, hetznerLocation.Text, hetznerType.Text);
             relayIp.Text = result.ip;
             Log($"Hetzner relay server created: ID {result.id}, IP {result.ip}. Allow several minutes for cloud-init.");
-            MessageBox.Show($"Relay VPS created!\\nIP: {result.ip}\\nUDP port: 45000\\nServer ID: {result.id}\\n\\nHetzner charges your account for this server.", "VZ NepTunnel");
+            MessageBox.Show($"Relay VPS created!\nIP: {result.ip}\nUDP port: 45000\nServer ID: {result.id}\n\nHetzner charges your account for this server.", "VZ NepTunnel");
         }
         catch (Exception ex) { Log("VPS provisioning failed: " + ex.Message); MessageBox.Show(ex.Message, "Hetzner provisioning"); }
         finally { UseWaitCursor = false; }
@@ -153,7 +162,7 @@ internal sealed class MainForm : Form
                 {
                     var response = Encoding.UTF8.GetString((await receive).Buffer);
                     Log("Relay response: " + response);
-                    MessageBox.Show("Relay responded: " + response + "\\nA peer must register in the same room to exchange traffic.");
+                    MessageBox.Show("Relay responded: " + response + "\nA peer must register in the same room to exchange traffic.");
                     return;
                 }
             }
@@ -205,11 +214,13 @@ internal sealed class MainForm : Form
             if (string.IsNullOrWhiteSpace(studioPath) || !File.Exists(studioPath)) FindStudio();
             if (string.IsNullOrWhiteSpace(studioPath)) return;
 
-            endpoint.Text = "Place opening in Roblox Studio — start the client test from Plugins.";
+            hostStatus.Text = "NOT HOSTED — LOCAL STUDIO TEST ONLY";
+            hostStatus.ForeColor = Color.Khaki;
+            endpoint.Text = $"Opening local place. Port {(int)hostPort.Value} is only a configured value; no network server or public tunnel has been verified.";
             Log("VZ Studio plugin installed. Opening the selected local place.");
             LaunchMapInStudio();
             MessageBox.Show(
-                "Your local place is opening in Roblox Studio.\\n\\nIn Studio, click Plugins > VZ NepTunnel > Start local client session. This starts one local server and one playable client window.\\n\\nThis is Studio's local multiplayer test; it does not yet allow friends over the Internet.",
+                "Your local place is opening in Roblox Studio.\n\nIn Studio, click Plugins > VZ NepTunnel > Start local client session. This starts one local server and one playable client window.\n\nThis is Studio's local multiplayer test; it does not yet allow friends over the Internet.",
                 "VZ NepTunnel — Start client session");
         }
         catch (Exception ex)
@@ -265,7 +276,12 @@ internal sealed class MainForm : Form
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Roblox", "Versions"),
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Roblox", "Versions")
         };
-        studioPath = candidates.Where(Directory.Exists).SelectMany(x => Directory.GetDirectories(x)).Select(x => Path.Combine(x,"RobloxStudioBeta.exe")).FirstOrDefault(File.Exists);
+        studioPath = candidates.Where(Directory.Exists)
+            .SelectMany(x => Directory.GetDirectories(x))
+            .Select(x => Path.Combine(x, "RobloxStudioBeta.exe"))
+            .Where(File.Exists)
+            .OrderByDescending(x => Directory.GetLastWriteTimeUtc(Path.GetDirectoryName(x)!))
+            .FirstOrDefault();
         if (studioPath == null) { using var d = new OpenFileDialog { Filter = "Roblox Studio (RobloxStudioBeta.exe)|RobloxStudioBeta.exe" }; if (d.ShowDialog() == DialogResult.OK) studioPath = d.FileName; }
         Log(studioPath == null ? "Roblox Studio not located." : "Roblox Studio: " + studioPath);
         if (studioPath != null) MessageBox.Show("Roblox Studio found:\n" + studioPath);
@@ -301,7 +317,7 @@ internal sealed class MainForm : Form
         catch (Exception ex)
         {
             Log("Could not open place in Studio: " + ex.Message);
-            MessageBox.Show("Could not open this place file in Roblox Studio. Try Studio > File > Open from File.\\n\\n" + ex.Message);
+            MessageBox.Show("Could not open this place file in Roblox Studio. Try Studio > File > Open from File.\n\n" + ex.Message);
         }
     }
     static string GetLanIp()
