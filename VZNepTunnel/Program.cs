@@ -169,12 +169,13 @@ internal sealed class MainForm : Form
     {
         try
         {
-            var source = Path.Combine(AppContext.BaseDirectory, "VZNepTunnelImporter.lua");
-            if (!File.Exists(source)) throw new FileNotFoundException("Plugin file was not included with this app build.", source);
             var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Roblox", "Plugins");
             Directory.CreateDirectory(folder);
             var target = Path.Combine(folder, "VZNepTunnelImporter.lua");
-            File.Copy(source, target, true);
+            using var resource = System.Reflection.Assembly.GetExecutingAssembly().GetManifestResourceStream("VZNepTunnel.VZNepTunnelImporter.lua");
+            if (resource == null) throw new FileNotFoundException("The Studio importer plugin is missing from this app build.");
+            using var output = File.Create(target);
+            resource.CopyTo(output);
             Log("Installed Roblox Studio plugin: " + target);
             MessageBox.Show("VZ importer plugin installed. Restart Roblox Studio to see it in Plugins.");
         }
