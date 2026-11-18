@@ -2,6 +2,8 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.Json;
+using DiscordRPC;
 
 namespace VZNepTunnel;
 
@@ -35,6 +37,15 @@ internal sealed class MainForm : Form
     CancellationTokenSource? hostCts;
     string? mapPath;
     string? studioPath;
+    readonly ComboBox themeChoice = new() { Width = 220, DropDownStyle = ComboBoxStyle.DropDownList };
+    readonly ComboBox appearanceChoice = new() { Width = 220, DropDownStyle = ComboBoxStyle.DropDownList };
+    readonly CheckBox discordEnabled = new() { Text = "Show VZ on Discord (Rich Presence)", AutoSize = true };
+    readonly TextBox discordAppId = new() { Width = 300, PlaceholderText = "Discord Application ID" };
+    readonly Label discordState = new() { AutoSize = true, Text = "Discord presence is off." };
+    DiscordRpcClient? discordClient;
+    readonly string settingsPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "VZ NepTunnel", "settings.json");
+    string selectedTheme = "Obsidian";
+    string appearance = "System";
 
     public MainForm()
     {
@@ -47,9 +58,11 @@ internal sealed class MainForm : Form
         tabs.TabPages.Add(ImporterPage());
         tabs.TabPages.Add(LogsPage());
         tabs.TabPages.Add(CloudPage());
+        tabs.TabPages.Add(SettingsPage());
         Controls.Add(tabs);
         Log("VZ NepTunnel started. LAN UDP testing is available; public Internet tunnelling requires a configured relay VPS.");
-        FormClosing += (_, _) => StopHost();
+        LoadSettings();
+        FormClosing += (_, _) => { StopHost(); StopDiscord(); SaveSettings(); };
     }
 
     TabPage Page(string title) { var p = new TabPage(title) { BackColor = BackColor, ForeColor = ForeColor, Padding = new Padding(18) }; return p; }
@@ -129,6 +142,108 @@ internal sealed class MainForm : Form
         flow.Controls.Add(Btn("Create UDP relay VPS", async () => await CreateRelayVps()));
         flow.Controls.Add(new Label { Text = "The VPS installs a UDP relay on port 45000. This creates relay infrastructure; it does not automatically route Roblox Studio's full multiplayer traffic yet.", AutoSize = true, MaximumSize = new Size(760,0), ForeColor = Color.Khaki, Margin = new Padding(0,18,0,0) });
         p.Controls.Add(flow); return p;
+    }
+
+    TabPage SettingsPage()
+    {
+        var p = Page("Settings");
+        var flow = new FlowLayoutPanel { Dock = DockStyle.Top, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true };
+        flow.Controls.Add(Heading("Personalize VZ NepTunnel"));
+        flow.Controls.Add(new Label { Text = "Five interface designs:", AutoSize = true });
+        themeChoice.Items.AddRange(new object[] { "Obsidian", "Carbon", "Arctic Silver", "Violet Pulse", "Crimson Edge" });
+        themeChoice.SelectedItem = selectedTheme;
+        themeChoice.SelectedIndexChanged += (_, _) => { selectedTheme = themeChoice.Text; ApplyTheme(); SaveSettings(); };
+        flow.Controls.Add(themeChoice);
+        flow.Controls.Add(new Label { Text = "Appearance:", AutoSize = true });
+        appearanceChoice.Items.AddRange(new object[] { "System", "Dark", "Light" });
+        appearanceChoice.SelectedItem = appearance;
+        appearanceChoice.SelectedIndexChanged += (_, _) => { appearance = appearanceChoice.Text; ApplyTheme(); SaveSettings(); };
+        flow.Controls.Add(appearanceChoice);
+        flow.Controls.Add(new Label { Text = "Discord Rich Presence", AutoSize = true, Font = new Font("Segoe UI", 13, FontStyle.Bold) });
+        flow.Controls.Add(discordEnabled);
+        flow.Controls.Add(new Label { Text = "Create an application at discord.com/developers/applications and paste its Application ID. Turn this off any time to hide VZ activity.", AutoSize = true, MaximumSize = new Size(740,0) });
+        flow.Controls.Add(discordAppId);
+        flow.Controls.Add(Btn("Apply Discord settings", () => ApplyDiscord()));
+        flow.Controls.Add(discordState);
+        flow.Controls.Add(Btn("Save settings", () => { SaveSettings(); MessageBox.Show("Preferences saved."); }));
+        p.Controls.Add(flow);
+        return p;
+    }
+
+    void LoadSettings()
+    {
+        try {
+            if (File.Exists(settingsPath)) {
+                using var doc = JsonDocument.Parse(File.ReadAllText(settingsPath));
+                var r = doc.RootElement;
+                if (r.TryGetProperty("theme", out var t)) selectedTheme = t.GetString() ?? "Obsidian";
+                if (r.TryGetProperty("appearance", out var a)) appearance = a.GetString() ?? "System";
+                if (r.TryGetProperty("discordEnabled", out var e)) discordEnabled.Checked = e.GetBoolean();
+                if (r.TryGetProperty("discordAppId", out var id)) discordAppId.Text = id.GetString() ?? "";
+            }
+        } catch (Exception ex) { Log("Settings load: " + ex.Message); }
+        if (themeChoice.Items.Contains(selectedTheme)) themeChoice.SelectedItem = selectedTheme;
+        if (appearanceChoice.Items.Contains(appearance)) appearanceChoice.SelectedItem = appearance;
+        ApplyTheme();
+        if (discordEnabled.Checked) ApplyDiscord();
+    }
+
+    void SaveSettings()
+    {
+        try {
+            Directory.CreateDirectory(Path.GetDirectoryName(settingsPath)!);
+            File.WriteAllText(settingsPath, JsonSerializer.Serialize(new { theme = selectedTheme, appearance, discordEnabled = discordEnabled.Checked, discordAppId = discordAppId.Text.Trim() }, new JsonSerializerOptions { WriteIndented = true }));
+        } catch (Exception ex) { Log("Settings save: " + ex.Message); }
+    }
+
+    void ApplyTheme()
+    {
+        bool dark = appearance == "Dark" || (appearance == "System" && IsSystemDark());
+        Color accent = selectedTheme switch {
+            "Carbon" => Color.FromArgb(90,100,115), "Arctic Silver" => Color.FromArgb(85,145,175),
+            "Violet Pulse" => Color.FromArgb(125,75,190), "Crimson Edge" => Color.FromArgb(175,55,65),
+            _ => Color.FromArgb(130,135,150)
+        };
+        BackColor = dark ? Color.FromArgb(19,21,27) : Color.FromArgb(238,240,244);
+        ForeColor = dark ? Color.Gainsboro : Color.FromArgb(30,34,42);
+        foreach (Control control in Controls) ThemeControl(control, dark, accent);
+        foreach (TabPage tab in Controls.OfType<TabControl>().SelectMany(x => x.TabPages.Cast<TabPage>())) { tab.BackColor = BackColor; tab.ForeColor = ForeColor; }
+    }
+
+    void ThemeControl(Control control, bool dark, Color accent)
+    {
+        if (control is Button b) { b.BackColor = accent; b.ForeColor = Color.White; }
+        else if (control is TextBox || control is ComboBox || control is ListBox) { control.BackColor = dark ? Color.FromArgb(32,36,45) : Color.White; control.ForeColor = dark ? Color.White : Color.FromArgb(25,28,35); }
+        else { control.BackColor = BackColor; control.ForeColor = ForeColor; }
+        foreach (Control child in control.Controls) ThemeControl(child, dark, accent);
+    }
+
+    static bool IsSystemDark()
+    {
+        try { return Microsoft.Win32.Registry.GetValue(@"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "AppsUseLightTheme", 1) is int v && v == 0; }
+        catch { return true; }
+    }
+
+    void ApplyDiscord()
+    {
+        StopDiscord();
+        if (!discordEnabled.Checked) { discordState.Text = "Off — VZ will not appear in Discord activity."; SaveSettings(); return; }
+        string id = discordAppId.Text.Trim();
+        if (id.Length < 15 || !id.All(char.IsDigit)) { discordState.Text = "Enter a valid Discord Application ID."; return; }
+        try {
+            discordClient = new DiscordRpcClient(id);
+            discordClient.Initialize();
+            discordClient.SetPresence(new RichPresence { Details = "Using VZ NepTunnel", State = "Preparing a VZ session", Assets = new Assets { LargeImageText = "VZ NepTunnel" }, Timestamps = Timestamps.Now });
+            discordState.Text = "Enabled — VZ activity is visible while the app is open.";
+            Log("Discord Rich Presence initialized.");
+        } catch (Exception ex) { StopDiscord(); discordState.Text = "Discord connection failed: " + ex.Message; Log("Discord RPC: " + ex.Message); }
+        SaveSettings();
+    }
+
+    void StopDiscord()
+    {
+        try { discordClient?.ClearPresence(); discordClient?.Dispose(); } catch { }
+        discordClient = null;
     }
 
     async Task CreateRelayVps()
