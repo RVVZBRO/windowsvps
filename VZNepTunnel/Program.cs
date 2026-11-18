@@ -180,8 +180,7 @@ internal sealed class MainForm : Form
         studioPath = candidates.Where(Directory.Exists).SelectMany(x => Directory.GetDirectories(x)).Select(x => Path.Combine(x,"RobloxStudioBeta.exe")).FirstOrDefault(File.Exists);
         if (studioPath == null) { using var d = new OpenFileDialog { Filter = "Roblox Studio (RobloxStudioBeta.exe)|RobloxStudioBeta.exe" }; if (d.ShowDialog() == DialogResult.OK) studioPath = d.FileName; }
         Log(studioPath == null ? "Roblox Studio not located." : "Roblox Studio: " + studioPath);
-        if (studioPath != null) MessageBox.Show("Roblox Studio found:
-" + studioPath);
+        if (studioPath != null) MessageBox.Show("Roblox Studio found:\n" + studioPath);
     }
     void OpenMap()
     {
