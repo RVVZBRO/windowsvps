@@ -35,7 +35,7 @@ write_files:
             room, role := parts[1], parts[2]; if len(room)<8 || len(room)>64 { continue }
             mu.Lock(); if rooms[room]==nil { rooms[room]=map[string]peer{} }; rooms[room][role]=peer{addr:addr,seen:time.Now()}
             other:=""host""; if role==""host"" { other=""join"" }; target:=rooms[room][other].addr; mu.Unlock()
-            if target!=nil { _,_=pc.WriteTo([]byte(""VZ1|""+room+""|READY""), addr) }; continue
+            if target!=nil { _,_=pc.WriteTo([]byte(""VZ1|""+room+""|READY""), addr); _,_=pc.WriteTo([]byte(""VZ1|""+room+""|READY""), target) } else { _,_=pc.WriteTo([]byte(""VZ1|""+room+""|REGISTERED""), addr) }; continue
           }
           if len(parts)>=3 && parts[0]==""DATA"" { room,role:=parts[1],parts[2]; if role!=""host"" && role!=""join"" { continue }
             other:=""host""; if role==""host"" { other=""join"" }; mu.Lock(); target:=rooms[room][other].addr; mu.Unlock()
