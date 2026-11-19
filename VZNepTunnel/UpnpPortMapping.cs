@@ -18,6 +18,7 @@ internal sealed class UpnpPortMapping : IDisposable
     private Uri? _controlUri;
     private string? _serviceType;
     private ushort _externalPort;
+    private ushort _internalPort;
     private bool _disposed;
 
     public IPAddress PublicAddress { get; private set; } = IPAddress.None;
@@ -25,7 +26,7 @@ internal sealed class UpnpPortMapping : IDisposable
 
     public static async Task<UpnpPortMapping> CreateAsync(ushort internalPort, CancellationToken cancellationToken = default)
     {
-        var mapping = new UpnpPortMapping();
+        var mapping = new UpnpPortMapping { _internalPort = internalPort };
         try
         {
             var (controlUri, serviceType) = await DiscoverControlServiceAsync(cancellationToken);
@@ -153,7 +154,7 @@ internal sealed class UpnpPortMapping : IDisposable
             ["NewRemoteHost"] = "",
             ["NewExternalPort"] = _externalPort.ToString(),
             ["NewProtocol"] = "UDP",
-            ["NewInternalPort"] = _externalPort == 0 ? "0" : "55556",
+            ["NewInternalPort"] = _internalPort.ToString(),
             ["NewInternalClient"] = localAddress.ToString(),
             ["NewEnabled"] = "1",
             ["NewPortMappingDescription"] = "VZ Studio Session",
