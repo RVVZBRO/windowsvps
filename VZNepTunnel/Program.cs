@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Net;
 using System.Net.Sockets;
+using System.Net.NetworkInformation;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -37,6 +38,8 @@ internal sealed class MainForm : Form
     private DirectJoinUdpProxy? joinProxy;
     private Process? studioServerProcess;
     private Process? studioClientProcess;
+    private CancellationTokenSource? mappingRenewalCts;
+    private Task? mappingRenewalTask;
     private bool closing;
     private bool sessionStarting;
 
@@ -252,6 +255,7 @@ internal sealed class MainForm : Form
         if (!ValidateStudio(requirePlace: true)) return;
 
         sessionStarting = true;
+        bool firewallRuleReady = false;
         try
         {
             StopSession();
@@ -274,7 +278,7 @@ internal sealed class MainForm : Form
             studioClientProcess = LaunchStudioClient(
                 Guid.NewGuid().ToString().ToUpperInvariant(),
                 Guid.NewGuid().ToString().ToUpperInvariant());
-            await Task.Delay(800);
+            await WaitForStudioClientAsync(studioClientProcess, TimeSpan.FromSeconds(5), "host");
 
             SetHostStatus("LOCAL PLAYTEST RUNNING — MAPPING ROUTER PORT…", Color.Khaki);
             try
@@ -284,9 +288,11 @@ internal sealed class MainForm : Form
 
                 Log("Checking Windows Firewall for the VZ UDP gateway…");
                 await WindowsFirewall.EnsureUdpRuleAsync(HostSessionUdpGateway.PublicPort, Log);
+                firewallRuleReady = true;
 
                 Log("Requesting a temporary UDP port mapping from your router…");
                 portMapping = await UpnpPortMapping.CreateAsync((ushort)HostSessionUdpGateway.PublicPort);
+                StartPortMappingRenewal(portMapping);
                 string publicHost = portMapping.PublicAddress.ToString();
                 int publicPort = portMapping.ExternalPort;
                 string endpoint = $"{publicHost}:{publicPort}";
@@ -299,19 +305,40 @@ internal sealed class MainForm : Form
             }
             catch (Exception networkError)
             {
+                StopPortMappingRenewal();
                 try { portMapping?.Dispose(); } catch { }
                 portMapping = null;
-                try { hostGateway?.Dispose(); } catch { }
-                hostGateway = null;
 
-                SetHostStatus("LOCAL PLAYTEST ONLY — DIRECT HOSTING UNAVAILABLE", Color.Khaki);
-                SetRelayStatus("Direct UDP unavailable — UPnP/public IPv4 required", Color.Khaki);
-                Log("Local Studio playtest is running, but direct remote access is unavailable: " + networkError.Message);
-                MessageBox.Show(this,
-                    "Your selected place and your own Studio test client are running locally.\n\nRemote hosting needs a router that supports UPnP and a public IPv4 from your ISP. If your ISP uses CGNAT, this direct method cannot work.\n\n" + networkError.Message,
-                    "VZ — Local playtest is running",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
+                if (firewallRuleReady && hostGateway != null)
+                {
+                    // Keep the token-protected gateway alive for friends on the
+                    // same LAN even when the router cannot publish a WAN port.
+                    string lanAddress = UpnpPortMapping.GetLocalIPv4Address().ToString();
+                    hostInviteBox.Text = VzInvite.Encode(
+                        lanAddress, HostSessionUdpGateway.PublicPort, roomId, sessionKey);
+                    SetHostStatus("LOCAL NETWORK ONLY — SHARE LAN INVITE", Color.Khaki);
+                    SetRelayStatus("LAN endpoint: " + lanAddress + ":" + HostSessionUdpGateway.PublicPort, Color.LightGreen);
+                    Log("Direct internet hosting is unavailable, but the LAN gateway remains active at " +
+                        lanAddress + ":" + HostSessionUdpGateway.PublicPort + ".");
+                    MessageBox.Show(this,
+                        "Your selected place and your own Studio player are running.\n\nVZ could not open a public internet port, but it kept a LAN-only invite active. Friends on the same Wi-Fi/LAN can use this invite. Friends outside your network still need a public relay or a public IPv4/UPnP mapping.\n\n" + networkError.Message,
+                        "VZ — LAN playtest is available",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                }
+                else
+                {
+                    try { hostGateway?.Dispose(); } catch { }
+                    hostGateway = null;
+                    SetHostStatus("LOCAL PLAYTEST ONLY — NETWORK PERMISSION NEEDED", Color.Khaki);
+                    SetRelayStatus("Direct UDP unavailable — firewall / UPnP / public IPv4 required", Color.Khaki);
+                    Log("Local Studio playtest is running, but remote hosting is unavailable: " + networkError.Message);
+                    MessageBox.Show(this,
+                        "Your selected place and your own Studio player are running locally.\n\nVZ could not open the Windows Firewall rule, so it stopped the network gateway. Approve the UDP rule the next time you host.\n\n" + networkError.Message,
+                        "VZ — Local playtest is running",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                }
             }
         }
         catch (Exception ex)
@@ -354,6 +381,7 @@ internal sealed class MainForm : Form
             studioClientProcess = LaunchStudioClient(
                 Guid.NewGuid().ToString().ToUpperInvariant(),
                 Guid.NewGuid().ToString().ToUpperInvariant());
+            await WaitForStudioClientAsync(studioClientProcess, TimeSpan.FromSeconds(5), "joining");
             SetJoinStatus("CONNECTED — STUDIO TEST CLIENT STARTED", Color.LightGreen);
             Log("Joined the host's VZ session. The place remains on the host PC; it was not uploaded.");
         }
@@ -374,19 +402,49 @@ internal sealed class MainForm : Form
 
     private static bool IsUdpPortInUse(int port)
     {
-        using var probe = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp)
-        {
-            ExclusiveAddressUse = true
-        };
         try
         {
-            probe.Bind(new IPEndPoint(IPAddress.Loopback, port));
-            return false;
+            // Query the OS UDP listener table instead of probing only 127.0.0.1.
+            // Studio may bind 0.0.0.0, which a loopback-only probe can miss on
+            // some Windows socket configurations.
+            return IPGlobalProperties.GetIPGlobalProperties()
+                .GetActiveUdpListeners()
+                .Any(endpoint => endpoint.Port == port);
         }
-        catch (SocketException ex) when (ex.SocketErrorCode == SocketError.AddressAlreadyInUse)
+        catch
         {
-            return true;
+            using var probe = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp)
+            {
+                ExclusiveAddressUse = true
+            };
+            try
+            {
+                probe.Bind(new IPEndPoint(IPAddress.Any, port));
+                return false;
+            }
+            catch (SocketException ex) when (ex.SocketErrorCode == SocketError.AddressAlreadyInUse)
+            {
+                return true;
+            }
         }
+    }
+
+    private async Task WaitForStudioClientAsync(Process client, TimeSpan timeout, string role)
+    {
+        DateTime deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            if (client.HasExited)
+                throw new InvalidOperationException(
+                    "Roblox Studio's " + role + " StartClient process exited with code " +
+                    client.ExitCode + ". Check the Activity log for Studio's command-line output.");
+            await Task.Delay(200);
+        }
+        if (client.HasExited)
+            throw new InvalidOperationException(
+                "Roblox Studio's " + role + " StartClient process exited with code " +
+                client.ExitCode + ". Check the Activity log for Studio's command-line output.");
+        Log("Studio " + role + " player process stayed open.");
     }
 
     private async Task WaitForStudioServerAsync(Process server, int port, TimeSpan timeout)
@@ -425,7 +483,7 @@ internal sealed class MainForm : Form
             "-instanceId", "StudioServer"
         };
         foreach (var arg in args) start.ArgumentList.Add(arg);
-        return Process.Start(start) ?? throw new InvalidOperationException("Roblox Studio StartServer process could not be started.");
+        return StartStudioProcess(start, "SERVER");
     }
 
     private Process LaunchStudioClient(string parentGuid, string playGuid)
@@ -438,7 +496,75 @@ internal sealed class MainForm : Form
             "-parentSessionGuid", parentGuid, "-playTestSessionGuid", playGuid, "-instanceId", "StudioPlayer"
         };
         foreach (var arg in args) start.ArgumentList.Add(arg);
-        return Process.Start(start) ?? throw new InvalidOperationException("Roblox Studio StartClient process could not be started.");
+        return StartStudioProcess(start, "PLAYER");
+    }
+
+    private Process StartStudioProcess(ProcessStartInfo start, string role)
+    {
+        // Studio documents that command-line launches write detailed logs to
+        // stdout. Capture them so unsupported flags or place-load errors are
+        // visible in VZ instead of looking like a silent failed launch.
+        start.RedirectStandardOutput = true;
+        start.RedirectStandardError = true;
+        start.CreateNoWindow = false;
+
+        var process = new Process { StartInfo = start, EnableRaisingEvents = true };
+        process.OutputDataReceived += (_, e) =>
+        {
+            if (!string.IsNullOrWhiteSpace(e.Data))
+                Log("[STUDIO " + role + "] " + e.Data);
+        };
+        process.ErrorDataReceived += (_, e) =>
+        {
+            if (!string.IsNullOrWhiteSpace(e.Data))
+                Log("[STUDIO " + role + " ERROR] " + e.Data);
+        };
+        process.Exited += (_, _) => Log("[STUDIO " + role + "] process exited" +
+            (process.ExitCode == 0 ? "." : " with code " + process.ExitCode + "."));
+
+        if (!process.Start())
+            throw new InvalidOperationException("Roblox Studio " + role + " process could not be started.");
+
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+        return process;
+    }
+
+    private void StartPortMappingRenewal(UpnpPortMapping mapping)
+    {
+        StopPortMappingRenewal();
+        mappingRenewalCts = new CancellationTokenSource();
+        var token = mappingRenewalCts.Token;
+        mappingRenewalTask = Task.Run(async () =>
+        {
+            while (!token.IsCancellationRequested)
+            {
+                try
+                {
+                    await Task.Delay(TimeSpan.FromMinutes(20), token);
+                    await mapping.RenewAsync(token);
+                    Log("Router UDP mapping lease renewed.");
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    Log("Router UDP mapping renewal warning: " + ex.Message);
+                    SetHostStatus("HOSTING — ROUTER MAPPING MAY EXPIRE", Color.Khaki);
+                }
+            }
+        }, token);
+    }
+
+    private void StopPortMappingRenewal()
+    {
+        try { mappingRenewalCts?.Cancel(); } catch { }
+        try { mappingRenewalTask?.Wait(TimeSpan.FromSeconds(1)); } catch { }
+        mappingRenewalCts?.Dispose();
+        mappingRenewalCts = null;
+        mappingRenewalTask = null;
     }
 
     private void CopyHostInvite()
@@ -452,6 +578,7 @@ internal sealed class MainForm : Form
     {
         try { hostGateway?.Dispose(); } catch (Exception ex) { Log("Host gateway cleanup warning: " + ex.Message); }
         hostGateway = null;
+        StopPortMappingRenewal();
         try { portMapping?.Dispose(); } catch (Exception ex) { Log("Router mapping cleanup warning: " + ex.Message); }
         portMapping = null;
         try { joinProxy?.Dispose(); } catch (Exception ex) { Log("Join proxy cleanup warning: " + ex.Message); }
@@ -511,6 +638,8 @@ internal sealed class MainForm : Form
         if (closing || logBox.IsDisposed) return;
         if (InvokeRequired) { try { BeginInvoke(new Action(() => Log(message))); } catch { } return; }
         logBox.AppendText($"[{DateTime.Now:HH:mm:ss}] {message}{Environment.NewLine}");
+        if (logBox.TextLength > 140000)
+            logBox.Text = logBox.Text[^100000..];
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)
