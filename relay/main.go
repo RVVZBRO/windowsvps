@@ -31,6 +31,7 @@ const (
 
 type peer struct {
 	addr *net.UDPAddr
+	key  [16]byte
 	seen time.Time
 }
 
@@ -135,13 +136,14 @@ func (s *relayServer) handle(packet []byte, remote *net.UDPAddr) {
 		s.sendStatus(remote, 1, "host registered")
 
 	case msgJoinRegister:
-		// VZR1 | type | room-id[16] | client-id[16]
-		if len(packet) != 37 {
+		// VZR1 | type | room-id[16] | client-id[16] | client-key[16]
+		if len(packet) != 53 {
 			return
 		}
-		var roomID, clientID [16]byte
+		var roomID, clientID, clientKey [16]byte
 		copy(roomID[:], packet[5:21])
 		copy(clientID[:], packet[21:37])
+		copy(clientKey[:], packet[37:53])
 
 		s.mu.Lock()
 		r := s.rooms[roomID]
@@ -155,18 +157,19 @@ func (s *relayServer) handle(packet []byte, remote *net.UDPAddr) {
 			s.sendStatus(remote, 2, "room is full")
 			return
 		}
-		r.joiners[clientID] = peer{addr: remote, seen: time.Now()}
+		r.joiners[clientID] = peer{addr: remote, key: clientKey, seen: time.Now()}
 		s.mu.Unlock()
 		s.sendStatus(remote, 1, "host is online")
 
 	case msgJoinData:
-		// VZR1 | type | room-id[16] | client-id[16] | UDP payload
-		if len(packet) < 38 {
+		// VZR1 | type | room-id[16] | client-id[16] | client-key[16] | UDP payload
+		if len(packet) < 54 {
 			return
 		}
-		var roomID, clientID [16]byte
+		var roomID, clientID, clientKey [16]byte
 		copy(roomID[:], packet[5:21])
 		copy(clientID[:], packet[21:37])
+		copy(clientKey[:], packet[37:53])
 
 		s.mu.Lock()
 		r := s.rooms[roomID]
@@ -175,7 +178,7 @@ func (s *relayServer) handle(packet []byte, remote *net.UDPAddr) {
 			return
 		}
 		p, ok := r.joiners[clientID]
-		if !ok || !sameAddr(p.addr, remote) {
+		if !ok || !sameAddr(p.addr, remote) || !bytes.Equal(p.key[:], clientKey[:]) {
 			s.mu.Unlock()
 			return
 		}
@@ -184,11 +187,11 @@ func (s *relayServer) handle(packet []byte, remote *net.UDPAddr) {
 		target := cloneAddr(r.hostAddr)
 		s.mu.Unlock()
 
-		out := make([]byte, 21+len(packet)-37)
+		out := make([]byte, 21+len(packet)-53)
 		copy(out[:4], magic)
 		out[4] = msgToHost
 		copy(out[5:21], clientID[:])
-		copy(out[21:], packet[37:])
+		copy(out[21:], packet[53:])
 		_, _ = s.conn.WriteToUDP(out, target)
 
 	case msgHostData:
