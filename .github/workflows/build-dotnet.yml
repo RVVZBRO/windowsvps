@@ -38,6 +38,8 @@ jobs:
           Copy-Item DIRECT-HOSTING.txt publish/DIRECT-HOSTING.txt
           New-Item -ItemType Directory -Force -Path publish/deploy/oracle | Out-Null
           Copy-Item deploy/oracle/README.txt publish/deploy/oracle/README.txt
+          Copy-Item deploy/oracle/setup-vz-relay.sh publish/deploy/oracle/setup-vz-relay.sh
+          if (!(Test-Path publish/deploy/oracle/setup-vz-relay.sh)) { throw "Oracle relay setup script is missing." }
           if (!(Test-Path publish/VZ.exe)) { throw "VZ.exe was not generated." }
       - name: Create portable ZIP
         shell: pwsh
