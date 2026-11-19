@@ -508,25 +508,35 @@ internal sealed class MainForm : Form
         return (host, port);
     }
 
-    private static string EncodeVzInvite(string endpoint, string protocol)
+    private static string EncodeVzInvite(string endpoint, string token, string parentGuid, string playGuid)
     {
-        var payload = JsonSerializer.SerializeToUtf8Bytes(new { v = 2, endpoint, protocol });
-        return "VZ2_" + Convert.ToBase64String(payload).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        var payload = JsonSerializer.SerializeToUtf8Bytes(new { v = 3, endpoint, token, parentGuid, playGuid });
+        return "VZ3_" + Convert.ToBase64String(payload).TrimEnd('=').Replace('+', '-').Replace('/', '_');
     }
 
-    private static (string Endpoint, string Protocol) DecodeVzInvite(string invite)
+    private static VzSessionInvite DecodeVzInvite(string invite)
     {
-        if (!invite.StartsWith("VZ2_", StringComparison.Ordinal)) throw new FormatException("This is not a VZ2 invite.");
+        if (!invite.StartsWith("VZ3_", StringComparison.Ordinal)) throw new FormatException("This is not a VZ3 Roblox Studio invite.");
         string encoded = invite[4..].Replace('-', '+').Replace('_', '/');
         encoded += new string('=', (4 - encoded.Length % 4) % 4);
         using var doc = JsonDocument.Parse(Convert.FromBase64String(encoded));
         var root = doc.RootElement;
-        if (!root.TryGetProperty("v", out var version) || version.GetInt32() != 2) throw new FormatException("Unsupported VZ invite version.");
+        if (!root.TryGetProperty("v", out var version) || version.GetInt32() != 3) throw new FormatException("Unsupported VZ invite version.");
         string endpoint = root.GetProperty("endpoint").GetString() ?? "";
-        string protocol = root.GetProperty("protocol").GetString() ?? "";
-        if (!endpoint.Contains(':') || protocol is not ("tcp" or "udp" or "both")) throw new FormatException("The VZ invite is missing a valid endpoint or protocol.");
-        return (endpoint, protocol);
+        string token = root.GetProperty("token").GetString() ?? "";
+        string parentGuid = root.GetProperty("parentGuid").GetString() ?? "";
+        string playGuid = root.GetProperty("playGuid").GetString() ?? "";
+        int separator = endpoint.LastIndexOf(':');
+        if (separator <= 0 || !int.TryParse(endpoint[(separator + 1)..], out int port) || port is < 1 or > 65535)
+            throw new FormatException("The VZ invite does not contain a valid host:port endpoint.");
+        if (token.Length < 32 || !Guid.TryParse(parentGuid, out _) || !Guid.TryParse(playGuid, out _))
+            throw new FormatException("The VZ invite is missing a valid session token or Studio session IDs.");
+        string host = endpoint[..separator].Trim('[', ']');
+        if (string.IsNullOrWhiteSpace(host)) throw new FormatException("The VZ invite host is empty.");
+        return new VzSessionInvite(endpoint, host, port, token, parentGuid, playGuid);
     }
+
+    private sealed record VzSessionInvite(string Endpoint, string Host, int Port, string Token, string ParentGuid, string PlayGuid);
 
     private static int GetFreeTcpPort()
     {
@@ -539,11 +549,11 @@ internal sealed class MainForm : Form
     {
         try
         {
-            var (endpoint, protocol) = DecodeVzInvite(joinCodeBox.Text.Trim());
-            activeEndpoint = endpoint;
-            activeProtocol = protocol;
-            joinEndpoint.Text = endpoint + "  •  " + protocol.ToUpperInvariant();
-            Log("Loaded VZ invite endpoint: " + endpoint + " (" + protocol + ")");
+            var invite = DecodeVzInvite(joinCodeBox.Text.Trim());
+            activeEndpoint = invite.Endpoint;
+            activeProtocol = "udp";
+            joinEndpoint.Text = invite.Endpoint + "  •  STUDIO UDP";
+            Log("VZ Studio invite validated: " + invite.Endpoint);
         }
         catch (Exception ex)
         {
@@ -551,11 +561,48 @@ internal sealed class MainForm : Form
         }
     }
 
+    private async void ConnectSession()
+    {
+        if (!ValidateStudio()) return;
+        if (joinProxy != null || tunnelProcess is { HasExited: false })
+        {
+            MessageBox.Show(this, "A VZ session is already active. Stop it before joining another.", "VZ", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        try
+        {
+            var invite = DecodeVzInvite(joinCodeBox.Text.Trim());
+            joinEndpoint.Text = invite.Endpoint + "  •  CONNECTING";
+            Log("Opening the selected local place for the matching Studio test session...");
+            LaunchPlaceForSession();
+            await Task.Delay(2500);
+
+            Log("Starting local UDP join proxy on 127.0.0.1:55555...");
+            joinProxy = new JoinSessionUdpProxy(invite.Host, invite.Port, invite.Token);
+            joinProxy.Start();
+            await Task.Delay(250);
+
+            studioClientProcess = LaunchStudioClient(invite.ParentGuid, invite.PlayGuid);
+            joinEndpoint.Text = invite.Endpoint + "  •  CLIENT STARTED";
+            Log("Roblox Studio StartClient launched against the host session.");
+            Log("Local proxy: 127.0.0.1:55555 -> " + invite.Endpoint);
+        }
+        catch (Exception ex)
+        {
+            Log("Join failed: " + ex);
+            joinProxy?.Dispose();
+            joinProxy = null;
+            StopChild(ref studioClientProcess);
+            MessageBox.Show(this, ex.Message, "VZ join error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
     private void CopyInvite()
     {
         if (string.IsNullOrWhiteSpace(inviteBox.Text)) return;
         Clipboard.SetText(inviteBox.Text);
-        Log("VZ invite copied to clipboard.");
+        Log("VZ Studio invite copied to clipboard.");
     }
 
     private void CopyJoinAddress()
@@ -572,6 +619,13 @@ internal sealed class MainForm : Form
 
     private void StopTunnel()
     {
+        try { hostRelay?.Dispose(); } catch (Exception ex) { Log("Host relay stop warning: " + ex.Message); }
+        hostRelay = null;
+        try { joinProxy?.Dispose(); } catch (Exception ex) { Log("Join proxy stop warning: " + ex.Message); }
+        joinProxy = null;
+
+        StopChild(ref studioServerProcess);
+        StopChild(ref studioClientProcess);
         try
         {
             if (tunnelProcess is { HasExited: false })
@@ -580,14 +634,74 @@ internal sealed class MainForm : Form
                 tunnelProcess.WaitForExit(3000);
             }
         }
-        catch (Exception ex) { Log("Tunnel stop warning: " + ex.Message); }
+        catch (Exception ex) { Log("Porthole stop warning: " + ex.Message); }
         tunnelProcess?.Dispose();
         tunnelProcess = null;
         activeEndpoint = null;
         inviteBox.Clear();
         publicEndpoint.Text = "No public endpoint yet";
+        joinEndpoint.Text = "No session loaded";
         SetHostStatus("Not hosting", Color.Khaki);
-        Log("Tunnel stopped.");
+        Log("VZ session stopped.");
+    }
+
+    private void StopChild(ref Process? process)
+    {
+        try
+        {
+            if (process is { HasExited: false })
+            {
+                process.Kill(true);
+                process.WaitForExit(2500);
+            }
+        }
+        catch (Exception ex) { Log("Process stop warning: " + ex.Message); }
+        process?.Dispose();
+        process = null;
+    }
+
+    private void LaunchPlaceForSession()
+    {
+        var start = new ProcessStartInfo { FileName = studioPath!, UseShellExecute = false };
+        start.ArgumentList.Add("--task");
+        start.ArgumentList.Add("EditFile");
+        start.ArgumentList.Add("--localPlaceFile");
+        start.ArgumentList.Add(placePath!);
+        Process.Start(start);
+    }
+
+    private Process LaunchStudioServer(string parentGuid, string playGuid)
+    {
+        var start = new ProcessStartInfo { FileName = studioPath!, UseShellExecute = false };
+        string[] args =
+        {
+            "-task", "StartServer",
+            "-placeId", "0", "-universeId", "0", "-placeVersion", "0",
+            "-port", HostSessionUdpRelay.StudioServerPort.ToString(),
+            "-creatorId", "0", "-creatorType", "0", "-userid", "0",
+            "-numTestServerPlayersUponStartup", "0",
+            "-parentSessionGuid", parentGuid,
+            "-playTestSessionGuid", playGuid,
+            "-instanceId", "StudioServer"
+        };
+        foreach (var arg in args) start.ArgumentList.Add(arg);
+        return Process.Start(start) ?? throw new InvalidOperationException("Roblox Studio StartServer process could not be started.");
+    }
+
+    private Process LaunchStudioClient(string parentGuid, string playGuid)
+    {
+        var start = new ProcessStartInfo { FileName = studioPath!, UseShellExecute = false };
+        string[] args =
+        {
+            "-task", "StartClient",
+            "-placeId", "0", "-universeId", "0", "-placeVersion", "0",
+            "-server", "127.0.0.1", "-port", JoinSessionUdpProxy.LocalClientPort.ToString(),
+            "-parentSessionGuid", parentGuid,
+            "-playTestSessionGuid", playGuid,
+            "-instanceId", "StudioPlayer"
+        };
+        foreach (var arg in args) start.ArgumentList.Add(arg);
+        return Process.Start(start) ?? throw new InvalidOperationException("Roblox Studio StartClient process could not be started.");
     }
 
     private void SetHostStatus(string value, Color color)
