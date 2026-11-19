@@ -22,7 +22,6 @@ internal sealed class MainForm : Form
 {
     readonly TextBox log = new() { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill, BackColor = Color.FromArgb(18, 22, 31), ForeColor = Color.Gainsboro };
     readonly TextBox address = new() { Width = 300, PlaceholderText = "Friend's IP address" };
-    readonly TextBox relayIp = new() { Width = 300, PlaceholderText = "Relay server public IPv4" };
     readonly TextBox roomCode = new() { Width = 300, PlaceholderText = "Shared room code (8+ characters)" };
     readonly TextBox portwarpTunnel = new() { Width = 300, PlaceholderText = "Tunnel name from Portwarp dashboard" };
     readonly TextBox portwarpStatus = new() { Width = 520, ReadOnly = true, Text = "Portwarp is not configured yet." };
@@ -78,7 +77,7 @@ internal sealed class MainForm : Form
     }
 
     TabPage Page(string title) { var p = new TabPage(title) { BackColor = BackColor, ForeColor = ForeColor, Padding = new Padding(18) }; return p; }
-    System.Windows.Forms.Button Btn(string text, Action action) { var b = new Button { Text = text, AutoSize = true, Padding = new Padding(12,7,12,7), BackColor = Color.FromArgb(49,93,160), ForeColor = Color.White, FlatStyle = FlatStyle.Flat }; b.Click += (_,_) => action(); return b; }
+    System.Windows.Forms.Button Btn(string text, Action action) { var b = new System.Windows.Forms.Button { Text = text, AutoSize = true, Padding = new Padding(12,7,12,7), BackColor = Color.FromArgb(49,93,160), ForeColor = Color.White, FlatStyle = FlatStyle.Flat }; b.Click += (_,_) => action(); return b; }
     Label Heading(string s) => new() { Text = s, AutoSize = true, Font = new Font("Segoe UI", 19, FontStyle.Bold), ForeColor = Color.White, Margin = new Padding(0,0,0,16) };
     void Log(string s) { if (log.InvokeRequired) { log.BeginInvoke(new Action(() => Log(s))); return; } log.AppendText($"[{DateTime.Now:HH:mm:ss}] {s}{Environment.NewLine}"); }
 
@@ -304,8 +303,9 @@ internal sealed class MainForm : Form
         public static string Create(string host, int port)
         {
             string payload = Convert.ToBase64String(Encoding.UTF8.GetBytes(host + "|" + port));
-            string code = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(payload)))[..6];
-            return "VZ1-" + code + "-" + payload.TrimEnd('=').Replace('+','-').Replace('/','_');
+            string safePayload = payload.TrimEnd('=').Replace('+','-').Replace('/','_');
+            string code = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(safePayload)))[..6];
+            return "VZ1-" + code + "-" + safePayload;
         }
 
         public static (string Host, int Port) Read(string code)
@@ -431,32 +431,6 @@ internal sealed class MainForm : Form
     {
         try { discordClient?.ClearPresence(); discordClient?.Dispose(); } catch { }
         discordClient = null;
-    }
-
-    async Task TestRelay()
-    {
-        try
-        {
-            var ip = IPAddress.Parse(relayIp.Text.Trim());
-            if (roomCode.Text.Trim().Length < 8) throw new ArgumentException("Room code must be at least 8 characters.");
-            using var udp = new UdpClient();
-            var ep = new IPEndPoint(ip, 45000);
-            var payload = Encoding.UTF8.GetBytes("VZ1|" + roomCode.Text.Trim() + "|" + relayRole.Text);
-            for (int i = 0; i < 5; i++)
-            {
-                await udp.SendAsync(payload, ep);
-                var receive = udp.ReceiveAsync();
-                if (await Task.WhenAny(receive, Task.Delay(700)) == receive)
-                {
-                    var response = Encoding.UTF8.GetString((await receive).Buffer);
-                    Log("Relay response: " + response);
-                    MessageBox.Show("Relay responded: " + response + "\nA peer must register in the same room to exchange traffic.");
-                    return;
-                }
-            }
-            throw new TimeoutException("No relay response. Check VPS cloud-init and UDP port 45000 firewall.");
-        }
-        catch (Exception ex) { Log("Relay test failed: " + ex.Message); MessageBox.Show(ex.Message, "Relay test"); }
     }
 
     void InstallPlugin()
