@@ -260,9 +260,6 @@ internal sealed class MainForm : Form
         try
         {
             StopSession();
-            SetHostStatus("Checking shared relay…", Color.Khaki);
-            var endpoint = await RelayEndpointResolver.ResolveAsync();
-
             SetHostStatus("Starting Studio…", Color.Khaki);
             byte[] roomId = RandomNumberGenerator.GetBytes(16);
             byte[] hostKey = RandomNumberGenerator.GetBytes(16);
@@ -286,12 +283,31 @@ internal sealed class MainForm : Form
             studioClientProcess = LaunchStudioClient(hostClientParentGuid, hostClientPlayGuid);
             await Task.Delay(800);
 
-            Log("Connecting to the VZ relay at " + endpoint + "…");
-            hostRelay = new HostSessionUdpRelay(endpoint, roomId, hostKey, sessionKey);
-            await hostRelay.StartAsync();
-            hostInviteBox.Text = VzInvite.Encode(roomId, sessionKey);
-            SetHostStatus("PLAYTEST RUNNING — SHARE THE INVITE", Color.LightGreen);
-            Log("Your Studio client is running against the selected local place. Host relay registered; send the VZ4 invite to friends.");
+            HostSessionUdpRelay? candidate = null;
+            try
+            {
+                var endpoint = await RelayEndpointResolver.ResolveAsync();
+                Log("Connecting to the VZ relay at " + endpoint + "…");
+                candidate = new HostSessionUdpRelay(endpoint, roomId, hostKey, sessionKey);
+                await candidate.StartAsync();
+                hostRelay = candidate;
+                hostInviteBox.Text = VzInvite.Encode(roomId, sessionKey);
+                SetHostStatus("PLAYTEST RUNNING — SHARE THE INVITE", Color.LightGreen);
+                Log("Your local Studio playtest is running and the VZ relay is connected. Send the VZ4 invite to friends.");
+            }
+            catch (Exception relayError)
+            {
+                try { candidate?.Dispose(); } catch { }
+                hostRelay = null;
+                hostInviteBox.Clear();
+                SetHostStatus("LOCAL PLAYTEST ONLY — RELAY OFFLINE", Color.Khaki);
+                Log("Local Studio playtest is running, but remote hosting is unavailable: " + relayError.Message);
+                MessageBox.Show(this,
+                    "Your selected place is now running in a local Studio playtest.\n\nFriends cannot join remotely until the shared VZ relay has been deployed and configured.\n\n" + relayError.Message,
+                    "VZ — Local playtest started",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
         }
         catch (Exception ex)
         {
