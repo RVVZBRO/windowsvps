@@ -1,4 +1,4 @@
-name: Build VZ Direct Multiplayer Windows x64
+name: Build VZ Shared Relay Windows x64
 on:
   push:
     branches: [vz-neptunnel-dotnet]
@@ -6,7 +6,22 @@ on:
 permissions:
   contents: read
 jobs:
-  build:
+  validate-relay:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout VZ
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.x'
+      - name: Test and compile relay
+        working-directory: relay
+        run: |
+          go test ./...
+          GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o /tmp/vz-relay-arm64 .
+          GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /tmp/vz-relay-amd64 .
+  build-windows:
     runs-on: windows-latest
     steps:
       - name: Checkout VZ
@@ -17,18 +32,20 @@ jobs:
           dotnet-version: 8.0.x
       - name: Publish self-contained Windows application
         run: dotnet publish VZNepTunnel/VZNepTunnel.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish
-      - name: Include quick-start guide
+      - name: Include quick-start and relay owner guide
         shell: pwsh
         run: |
           Copy-Item DIRECT-HOSTING.txt publish/DIRECT-HOSTING.txt
+          New-Item -ItemType Directory -Force -Path publish/deploy/oracle | Out-Null
+          Copy-Item deploy/oracle/README.txt publish/deploy/oracle/README.txt
           if (!(Test-Path publish/VZ.exe)) { throw "VZ.exe was not generated." }
       - name: Create portable ZIP
         shell: pwsh
-        run: Compress-Archive -Path publish/* -DestinationPath VZ-Direct-Multiplayer-Windows-x64.zip -CompressionLevel Optimal
+        run: Compress-Archive -Path publish/* -DestinationPath VZ-Shared-Relay-Windows-x64.zip -CompressionLevel Optimal
       - name: Upload portable VZ build
         uses: actions/upload-artifact@v4
         with:
-          name: VZ-Direct-Multiplayer-Windows-x64
-          path: VZ-Direct-Multiplayer-Windows-x64.zip
+          name: VZ-Shared-Relay-Windows-x64
+          path: VZ-Shared-Relay-Windows-x64.zip
           if-no-files-found: error
           retention-days: 30
