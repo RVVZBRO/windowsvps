@@ -1,0 +1,36 @@
+name: Build VZ Windows Client
+on:
+  push:
+    branches: [vz-playable-client]
+    paths:
+      - "VZGame/**"
+      - ".github/workflows/build-vz-game.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Godot 4.5.1
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: 4.5.1
+          use-dotnet: false
+          include-templates: true
+      - name: Validate project and scripts
+        shell: pwsh
+        run: godot --headless --editor --path VZGame --quit
+      - name: Export Windows x64 client
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          godot --headless --path VZGame --export-release "Windows Desktop" dist/VZClient.exe
+      - name: Upload VZClient.exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: VZ-Playable-Client-Windows-x64
+          path: dist/VZClient.exe
+          if-no-files-found: error
+          retention-days: 30
