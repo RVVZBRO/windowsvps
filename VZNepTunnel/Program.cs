@@ -416,7 +416,7 @@ internal sealed class MainForm : Form
 
     void ThemeControl(Control control, bool dark, Color accent)
     {
-        if (control is Button b) { b.BackColor = accent; b.ForeColor = Color.White; }
+        if (control is System.Windows.Forms.Button b) { b.BackColor = accent; b.ForeColor = Color.White; }
         else if (control is TextBox || control is ComboBox || control is ListBox) { control.BackColor = dark ? Color.FromArgb(32,36,45) : Color.White; control.ForeColor = dark ? Color.White : Color.FromArgb(25,28,35); }
         else { control.BackColor = BackColor; control.ForeColor = ForeColor; }
         foreach (Control child in control.Controls) ThemeControl(child, dark, accent);
