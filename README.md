@@ -18,7 +18,7 @@ get a public address and port without paying a VPS bill, run your own relay
 on Oracle Cloud Always Free, subject to the provider's quotas and capacity:
 
 1. Sign up at https://www.oracle.com/cloud/free/ and create an Ubuntu VM
-   in your home region using an Always Free eligible shape.
+   in your home region using the Always Free VM.Standard.E2.1.Micro (AMD/x86-64) shape. The Porthole container bundled by the upstream project is x86-64; do not choose the ARM A1 shape for this script.
 2. Assign it a public IPv4 address.
 3. Run deploy/oracle/setup-vz-relay.sh on the VM as root.
 4. In Oracle's VCN Security List or Network Security Group, separately open
@@ -27,9 +27,7 @@ on Oracle Cloud Always Free, subject to the provider's quotas and capacity:
 5. Run: cd /opt/vz-porthole && sudo docker compose run --rm porthole invite
 6. Paste the generated porthole1_... code into VZ's Host Session tab.
 
-Oracle lists Always Free compute resources and up to 10 TB/month outbound
-transfer. A card may be required at signup; regional capacity is not
-guaranteed. Review current limits:
+Oracle lists up to two Always Free VM.Standard.E2.1.Micro AMD instances (each 1/8 OCPU, 1 GB RAM and up to 50 Mbps) and 10 TB/month outbound transfer. Capacity and account quotas apply; a card may be required at signup. Review current limits:
 https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier_topic-Always_Free_Resources.htm
 
 ## Host a tunnel
