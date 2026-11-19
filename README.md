@@ -1,32 +1,54 @@
 # VZ NepTunnel
 
-Windows x64 desktop build of the VZ NepTunnel Python/CustomTkinter application.
+VZ NepTunnel is a Windows x64 desktop session launcher with Portwarp tunnel controls.
+
+## What this branch currently provides
+
+- WinForms desktop UI for hosting and joining.
+- Portwarp CLI setup (download from Portwarp's official downloads page and select the extracted `pwrp.exe`).
+- Browser/device sign-in using `pwrp login`.
+- List, connect, and stop configured Portwarp tunnels.
+- Launch a user-selected dedicated game-server executable.
+- Pass optional server arguments with `{map}` and `{port}` substitutions.
+- Generate a VZ1 invite containing the public Portwarp hostname and port.
+- Decode invites and launch a user-selected client with `{host}` and `{port}` substitutions.
+- Activity log, appearance settings, and optional Discord Rich Presence.
+
+## First-time Portwarp setup
+
+1. Install/update Portwarp CLI from the Portwarp downloads page using the Portwarp tab in VZ.
+2. Click **Sign in to Portwarp** and approve the device in your browser.
+3. Open the Portwarp dashboard and create/enable a tunnel using the game server's local port and the correct protocol (TCP or UDP).
+4. Copy the tunnel name into VZ's Host tab.
+5. Keep the local server port and Portwarp tunnel's configured local port identical.
+
+## Hosting
+
+1. Select the local map if the game server accepts a map path.
+2. Select the dedicated server executable.
+3. Add its documented command-line arguments. Use `{map}` for the selected map path and `{port}` for the configured local port.
+4. Enter the Portwarp tunnel name and click **HOST GAME**.
+5. Copy the public hostname and port from the Portwarp dashboard into VZ's public address field.
+6. Click **Create / refresh invite** and share the resulting VZ1 code with friends.
+7. Click **STOP GAME** to stop the server and ask Portwarp to stop the tunnel.
+
+## Joining
+
+1. Paste the host's VZ1 invite code.
+2. Select the matching game client executable.
+3. Set its documented arguments, using `{host}` and `{port}` for the endpoint.
+4. Click **JOIN GAME**.
+
+## Important compatibility and security limits
+
+- Portwarp is a network tunnel, not a game server, matchmaking service, or game engine.
+- This app does not include a Roblox-compatible runtime or dedicated Roblox place server. A `.rbxl` / `.rbxlx` file cannot be executed by this app as a standalone multiplayer server. The existing Studio plugin can still be used for local Studio testing/import workflows, but it does not make remote Internet gameplay work.
+- For Roblox multiplayer, a compatible server/runtime and network protocol integration are still required. The generic server/client launcher only works with a game that provides its own compatible dedicated server and client executables.
+- VZ1 invites encode the public endpoint and a checksum. They are shareable convenience codes, **not authentication or access-control tokens**. Do not expose an unauthenticated game server; configure access control in the game server itself.
+- The Portwarp endpoint is copied manually from the dashboard in this version. VZ does not yet discover public endpoints automatically.
+- TCP/UDP protocol and local port must match the game server and the Portwarp dashboard tunnel. VZ does not transparently convert protocols.
+- End-to-end tunnel and multiplayer tests require a real Portwarp account, a configured tunnel, and a compatible dedicated server/client.
 
 ## Build
-GitHub Actions on branch `vz-neptunnel-build` builds with `windows-latest` and publishes `VZ-NepTunnel-Windows-x64` as a workflow artifact.
 
-## Functionality status
-This build verifies Python syntax, PyInstaller packaging, and the resulting Windows PE file. It does **not** certify live Roblox multiplayer networking. Portwarp API availability, the Portwarp CLI, Roblox Studio launch arguments, and the RBXM Studio plugin bridge require separate end-to-end tests with a real Portwarp account and Roblox Studio installation. The RBXM bridge is not implemented in this prototype.
-
-
-Native .NET app branch: `vz-neptunnel-dotnet`. Build workflow: `.github/workflows/build-dotnet.yml`.
-
-Build validation pass after fixing C# compile errors.
-
-
-## Native VZ NepTunnel app additions
-- Hetzner Cloud API provisioning UI creates an Ubuntu relay VM and configures a UDP relay on port 45000. A Hetzner API token with Read & Write permission is required; server charges apply.
-- Relay room registration test supports host/join roles.
-- Roblox Studio importer plugin can be installed from the RBXM Importer tab. It uses StudioService's local file picker and temporary asset IDs.
-- The relay is currently a raw UDP room relay/probe, **not a complete transparent Roblox Studio port-forward/VPN**. Studio multiplayer traffic has not yet been wired through the relay.
-
-The Studio importer plugin is embedded in the standalone executable so the EXE is self-contained.
-
-
-## Host a local Roblox Studio client session
-1. Close all running Roblox Studio windows before clicking Host Session (so the plugin can load).
-2. In VZ NepTunnel, choose a local `.rbxl` or `.rbxlx` file and click **Host selected map in Studio**.
-3. VZ installs `VZNepTunnelHost.lua` into `%LOCALAPPDATA%\\Roblox\\Plugins` and opens the selected local place using Studio's documented `--task EditFile --localPlaceFile` command-line options.
-4. In Studio, click **Plugins > VZ NepTunnel > Start local client session**. The plugin calls `StudioTestService:ExecuteMultiplayerTestAsync(1, ...)`, which starts one local server and one playable client simulation. End it with Studio's End Session control.
-
-This is a local Studio server/client test workflow. It does **not** yet tunnel the live Studio server traffic to remote friends over the Internet. The Hetzner UDP relay is only a separate relay/probe component at this stage.
+GitHub Actions builds the self-contained Windows x64 executable on pushes to `vz-neptunnel-dotnet`. The artifact is named `VZ-NepTunnel-Windows-x64`.
