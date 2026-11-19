@@ -1,0 +1,50 @@
+VZ DIRECT MULTIPLAYER — QUICK START
+
+The goal of this build is no third-party relay account and no separate tunnel
+setup. VZ attempts to create a direct UDP port mapping on the host's router
+using UPnP.
+
+HOST
+1. Install/run Roblox Studio.
+2. Open VZ and choose the local .rbxl/.rbxlx place file.
+3. Click HOST SESSION.
+4. VZ opens the place, starts the Studio StartServer test process, opens a
+   temporary UDP port through the router, and reads the router's public IPv4.
+5. Share the TUNNEL ADDRESS and SESSION ID shown in VZ.
+
+JOIN
+1. The other player runs VZ and locates Roblox Studio if asked.
+2. They enter the host's TUNNEL ADDRESS (public-ip:port).
+3. They enter the SESSION ID.
+4. They click JOIN SESSION.
+
+No Porthole install, relay invitation code, Oracle account, or map upload is
+used by this direct-hosting build. The host's place stays local and unpublished.
+
+NETWORK REQUIREMENTS / HONEST LIMIT
+Direct internet hosting needs the host's router to allow UPnP port mapping and
+the host's ISP to provide a publicly reachable IPv4 address. Some routers ship
+with UPnP disabled. Some ISPs put customers behind Carrier-Grade NAT (CGNAT).
+In those situations, a direct inbound connection is not possible just by
+changing the VZ program: an internet-reachable relay server would be needed.
+A relay requires a real machine and outbound bandwidth somewhere. No program
+can create free public compute/bandwidth out of nothing.
+
+When UPnP is unavailable, VZ reports that it could not create a direct
+connection instead of generating a fake address or pretending the tunnel is
+live. The host can ask the ISP for a public IPv4 or use a router/network that
+supports UPnP. This build does not include a centrally operated relay.
+
+SESSION
+- Studio local test server: UDP 55555
+- VZ token bridge: UDP 55556
+- The router mapping is removed when the host stops the VZ session.
+- The host must leave VZ and the Studio test server running.
+- Share the session ID only with people you trust.
+
+COMPATIBILITY
+The multiplayer launch uses Roblox Studio's StartServer / StartClient test
+startup flags, based on the open-source Studio Bridge pattern. Roblox may
+change these internal flags or the underlying test networking at any time.
+This is an experimental unpublished Studio test path, not official Roblox
+Player matchmaking. VZ does not upload or publish the local place.
