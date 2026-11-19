@@ -630,7 +630,7 @@ internal sealed class HostSessionUdpRelay : IDisposable
 
                 byte[] clientId = data[5..21];
                 string id = Convert.ToHexString(clientId);
-                var route = _peers.GetOrAdd(id, _ =>
+                var route = _peers.GetOrAdd(id, peerKey =>
                 {
                     var socket = new UdpClient(AddressFamily.InterNetwork);
                     var peer = new PeerRoute(clientId, socket);
