@@ -180,13 +180,12 @@ internal sealed class JoinSessionUdpProxy : IDisposable
         catch (SocketException) when (_stop.IsCancellationRequested) { }
     }
 
-    public async ValueTask DisposeAsync()
+    public void Dispose()
     {
         _stop.Cancel();
         _listener.Dispose();
         foreach (var socket in _routes.Values) socket.Dispose();
         _routes.Clear();
-        await Task.Delay(50);
         _stop.Dispose();
     }
 }
