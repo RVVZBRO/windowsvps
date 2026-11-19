@@ -163,7 +163,7 @@ func _host_game() -> void:
 	multiplayer.multiplayer_peer = peer
 	server_mode = true
 	local_id = 1
-	_spawn_player(1, name_edit.text)
+	spawn_player(1, name_edit.text)
 	_set_status("Hosting VZ session on UDP " + str(_get_port()) + ". Connect Portwarp to expose it.")
 
 func _join_game() -> void:
