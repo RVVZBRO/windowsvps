@@ -10,7 +10,7 @@ namespace VZNepTunnel;
 /// Host listens on UDP 55556 and forwards authenticated datagrams to the
 /// local Studio test server on UDP 55555.
 /// </summary>
-internal sealed class HostSessionUdpRelay : IAsyncDisposable
+internal sealed class HostSessionUdpRelay : IDisposable
 {
     public const int StudioServerPort = 55555;
     public const int HostRelayPort = 55556;
@@ -77,13 +77,12 @@ internal sealed class HostSessionUdpRelay : IAsyncDisposable
         catch (SocketException) when (_stop.IsCancellationRequested) { }
     }
 
-    public async ValueTask DisposeAsync()
+    public void Dispose()
     {
         _stop.Cancel();
         _listener.Dispose();
         foreach (var route in _routes.Values) route.Socket.Dispose();
         _routes.Clear();
-        await Task.Delay(50);
         _stop.Dispose();
     }
 }
@@ -93,7 +92,7 @@ internal sealed class HostSessionUdpRelay : IAsyncDisposable
 /// this proxy prefixes the session token and forwards to the host's public
 /// Porthole UDP endpoint.
 /// </summary>
-internal sealed class JoinSessionUdpProxy : IAsyncDisposable
+internal sealed class JoinSessionUdpProxy : IDisposable
 {
     private readonly byte[] _token;
     private readonly IPEndPoint _host;
