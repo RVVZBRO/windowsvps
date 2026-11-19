@@ -397,7 +397,8 @@ internal sealed class MainForm : Form
                 local = "127.0.0.1:55556",
                 remote_port = 0,
                 encrypted = false,
-                udp_mtu = 1200
+                udp_mtu = 1200,
+                udp_source_pool = "127.64.0.0/16"
             };
             using var response = await http.PostAsJsonAsync($"http://{webBind}/api/tunnels", request);
             var body = await response.Content.ReadAsStringAsync();
