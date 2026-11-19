@@ -7,6 +7,7 @@ internal static class PortwarpManager
     private static readonly string InstallDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VZ NepTunnel", "Portwarp");
     private static readonly string ExePath = Path.Combine(InstallDir, "pwrp.exe");
     private const string DownloadsPage = "https://portwarp.com/downloads";
+    public static string ExecutablePath => ExePath;
 
     public static Task<string> InstallOrUpdateAsync()
     {
