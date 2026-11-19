@@ -23,9 +23,10 @@ internal sealed class MainForm : Form
     readonly TextBox address = new() { Width = 300, PlaceholderText = "Friend's IP address" };
     readonly TextBox relayIp = new() { Width = 300, PlaceholderText = "Relay server public IPv4" };
     readonly TextBox roomCode = new() { Width = 300, PlaceholderText = "Shared room code (8+ characters)" };
-    readonly TextBox hetznerToken = new() { Width = 420, UseSystemPasswordChar = true, PlaceholderText = "Hetzner API token (Read & Write)" };
-    readonly ComboBox hetznerLocation = new() { Width = 180, DropDownStyle = ComboBoxStyle.DropDownList };
-    readonly ComboBox hetznerType = new() { Width = 180, DropDownStyle = ComboBoxStyle.DropDownList };
+    readonly TextBox portwarpTunnel = new() { Width = 300, PlaceholderText = "Tunnel name from Portwarp dashboard" };
+    readonly TextBox portwarpStatus = new() { Width = 520, ReadOnly = true, Text = "Portwarp is not configured yet." };
+    
+    
     readonly ComboBox relayRole = new() { Width = 140, DropDownStyle = ComboBoxStyle.DropDownList };
     readonly NumericUpDown hostPort = new() { Minimum = 1024, Maximum = 65535, Value = 53640, Width = 100 };
     readonly NumericUpDown joinPort = new() { Minimum = 1024, Maximum = 65535, Value = 53640, Width = 100 };
@@ -57,10 +58,10 @@ internal sealed class MainForm : Form
         tabs.TabPages.Add(JoinPage());
         tabs.TabPages.Add(ImporterPage());
         tabs.TabPages.Add(LogsPage());
-        tabs.TabPages.Add(CloudPage());
+        tabs.TabPages.Add(PortwarpPage());
         tabs.TabPages.Add(SettingsPage());
         Controls.Add(tabs);
-        Log("VZ NepTunnel started. Public VPS relay is the intended connection path; LAN-IP joining is disabled.");
+        Log("VZ NepTunnel started. Portwarp is the tunnel provider; LAN-IP joining is disabled.");
         LoadSettings();
         discordEnabled.CheckedChanged += (_, _) => ApplyDiscord();
         FormClosing += (_, _) => { StopHost(); StopDiscord(); SaveSettings(); };
@@ -127,21 +128,59 @@ internal sealed class MainForm : Form
     TabPage LogsPage() { var p = Page("Activity"); p.Controls.Add(log); return p; }
 
 
-    TabPage CloudPage()
+    TabPage PortwarpPage()
     {
-        var p = Page("VPS Relay");
+        var p = Page("Portwarp");
         var flow = new FlowLayoutPanel { Dock = DockStyle.Top, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true };
-        flow.Controls.Add(Heading("Create your VZ relay VPS"));
-        flow.Controls.Add(new Label { Text = "Paste a Hetzner Cloud API token with Read & Write permission. The token is used only for this request and is not saved.", AutoSize = true, MaximumSize = new Size(760,0) });
-        flow.Controls.Add(hetznerToken);
-        hetznerLocation.Items.AddRange(new object[] { "fsn1", "nbg1", "hel1", "ash", "hil", "sin" }); hetznerLocation.SelectedIndex = 0;
-        hetznerType.Items.AddRange(new object[] { "cx22", "cpx22", "cpx32" }); hetznerType.SelectedIndex = 0;
-        flow.Controls.Add(new Label { Text = "Location:", AutoSize = true }); flow.Controls.Add(hetznerLocation);
-        flow.Controls.Add(new Label { Text = "Server type (Hetzner billing applies):", AutoSize = true }); flow.Controls.Add(hetznerType);
-        flow.Controls.Add(Btn("Create UDP relay VPS", async () => await CreateRelayVps()));
-        flow.Controls.Add(new Label { Text = "The VPS installs a UDP relay on port 45000. This creates relay infrastructure; it does not automatically route Roblox Studio's full multiplayer traffic yet.", AutoSize = true, MaximumSize = new Size(760,0), ForeColor = Color.Khaki, Margin = new Padding(0,18,0,0) });
+        flow.Controls.Add(Heading("VZ  //  PORTWARP CONNECTION"));
+        flow.Controls.Add(new Label { Text = "VZ uses Portwarp to expose a local game-server port to friends. No router port forwarding or home-IP sharing is needed.", AutoSize = true, MaximumSize = new Size(760,0) });
+        flow.Controls.Add(portwarpStatus);
+        flow.Controls.Add(Btn("Install / Update Portwarp CLI", async () => await InstallPortwarp()));
+        flow.Controls.Add(Btn("Sign in to Portwarp", async () => await PortwarpLogin()));
+        flow.Controls.Add(Btn("Open Portwarp dashboard", () => Process.Start(new ProcessStartInfo("https://portwarp.com/dashboard") { UseShellExecute = true })));
+        flow.Controls.Add(new Label { Text = "Create and enable a UDP or TCP tunnel in the Portwarp dashboard once. Set its local port to the same port your game server uses.", AutoSize = true, MaximumSize = new Size(760,0), ForeColor = Color.Khaki });
+        flow.Controls.Add(new Label { Text = "Tunnel name:", AutoSize = true }); flow.Controls.Add(portwarpTunnel);
+        flow.Controls.Add(Btn("Refresh Portwarp tunnels", async () => await RefreshPortwarp()));
+        flow.Controls.Add(Btn("Connect selected tunnel", async () => await ConnectPortwarp()));
+        flow.Controls.Add(Btn("Stop Portwarp tunnel", async () => await StopPortwarp()));
+        flow.Controls.Add(new Label { Text = "The public address is shown in your Portwarp dashboard. VZ will not claim a playable session unless a compatible game server is running on the selected local port.", AutoSize = true, MaximumSize = new Size(760,0), ForeColor = Color.Khaki, Margin = new Padding(0,18,0,0) });
         p.Controls.Add(flow); return p;
     }
+
+    async Task InstallPortwarp()
+    {
+        try { UseWaitCursor = true; string path = await PortwarpManager.InstallOrUpdateAsync(); portwarpStatus.Text = "Portwarp CLI installed: " + path; Log("Portwarp CLI installed and SHA-256 verified."); }
+        catch (Exception ex) { portwarpStatus.Text = "Portwarp installation failed: " + ex.Message; Log(portwarpStatus.Text); MessageBox.Show(ex.Message, "Portwarp"); }
+        finally { UseWaitCursor = false; }
+    }
+    async Task PortwarpLogin()
+    {
+        try { string output = await PortwarpManager.RunAsync("login", TimeSpan.FromMinutes(3), line => Log("Portwarp: " + line)); portwarpStatus.Text = output.Length > 0 ? output : "Login command completed; approve the device in your browser."; }
+        catch (Exception ex) { portwarpStatus.Text = "Login failed: " + ex.Message; Log(portwarpStatus.Text); MessageBox.Show(ex.Message, "Portwarp login"); }
+    }
+    async Task RefreshPortwarp()
+    {
+        try { string output = await PortwarpManager.RunAsync("tunnels", TimeSpan.FromSeconds(20), line => Log("Portwarp: " + line)); MessageBox.Show(output, "Configured Portwarp tunnels"); }
+        catch (Exception ex) { MessageBox.Show(ex.Message, "Portwarp"); }
+    }
+    async Task ConnectPortwarp()
+    {
+        try {
+            if (string.IsNullOrWhiteSpace(portwarpTunnel.Text)) throw new InvalidOperationException("Enter the exact tunnel name shown by Portwarp.");
+            string output = await PortwarpManager.RunAsync("connect " + QuoteArg(portwarpTunnel.Text.Trim()) + " --detach", TimeSpan.FromSeconds(30), line => Log("Portwarp: " + line));
+            portwarpStatus.Text = "Connect command completed. Verify the tunnel is running in Portwarp.";
+            Log(output); MessageBox.Show("Connect command completed. Check the Portwarp dashboard/session status before sharing the public endpoint.", "VZ Portwarp");
+        } catch (Exception ex) { portwarpStatus.Text = "Tunnel connection failed: " + ex.Message; Log(portwarpStatus.Text); MessageBox.Show(ex.Message, "Portwarp"); }
+    }
+    async Task StopPortwarp()
+    {
+        try {
+            if (string.IsNullOrWhiteSpace(portwarpTunnel.Text)) throw new InvalidOperationException("Enter the exact tunnel name first.");
+            string output = await PortwarpManager.RunAsync("stop " + QuoteArg(portwarpTunnel.Text.Trim()), TimeSpan.FromSeconds(20), line => Log("Portwarp: " + line));
+            portwarpStatus.Text = "Stop command completed."; Log(output);
+        } catch (Exception ex) { MessageBox.Show(ex.Message, "Portwarp"); }
+    }
+    static string QuoteArg(string value) => "\"" + value.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
 
     TabPage SettingsPage()
     {
