@@ -1,110 +1,97 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# VZ / Porthole relay bootstrap for an Ubuntu OCI Always Free VM.
-# Usage: sudo bash setup-vz-relay.sh [public-ip-or-dns]
+# VZ native UDP relay installer for Oracle Cloud Ubuntu Always Free VMs.
+# Supports both Ampere A1 (aarch64) and AMD E2.1.Micro (x86_64).
+# Run: curl -fsSL https://raw.githubusercontent.com/RVVZBRO/windowsvps/vz-neptunnel-dotnet/deploy/oracle/setup-vz-relay.sh | sudo bash
 
-if [[ "${EUID}" -ne 0 ]]; then
-  echo "Run this script with sudo: sudo bash $0 [public-ip-or-dns]" >&2
+if [[ "\${EUID}" -ne 0 ]]; then
+  echo "Run this installer as root (use sudo)." >&2
   exit 1
 fi
-
-PUBLIC_HOST="${1:-}"
-CONTROL_PORT="${PORTHOLE_CONTROL_PORT:-7835}"
-MIN_PORT="${PORTHOLE_MIN_PORT:-10000}"
-MAX_PORT="${PORTHOLE_MAX_PORT:-20000}"
-INSTALL_DIR="/opt/vz-porthole"
-
-if [[ "$(uname -m)" != "x86_64" ]]; then
-  echo "This bundled Porthole GHCR image is x86-64. Use Oracle VM.Standard.E2.1.Micro (AMD), not Ampere A1 ARM." >&2
-  exit 1
-fi
-
 if ! command -v apt-get >/dev/null 2>&1; then
-  echo "This setup script supports Ubuntu/Debian with apt." >&2
+  echo "This installer supports Ubuntu/Debian images with apt." >&2
   exit 1
 fi
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y ca-certificates curl git openssl ufw
+apt-get install -y ca-certificates curl golang-go ufw
 
-if [[ -z "$PUBLIC_HOST" ]]; then
-  PUBLIC_HOST="$(curl -4 -fsS --max-time 8 https://api.ipify.org || true)"
-fi
-if [[ -z "$PUBLIC_HOST" ]]; then
-  echo "Could not detect public IPv4. Re-run with: sudo bash $0 YOUR_PUBLIC_IP" >&2
-  exit 1
-fi
+ARCH="$(uname -m)"
+case "$ARCH" in
+  aarch64|arm64|x86_64|amd64) ;;
+  *) echo "Unsupported VM architecture: $ARCH" >&2; exit 1 ;;
+esac
 
-if ! command -v docker >/dev/null 2>&1; then
-  curl -fsSL https://get.docker.com -o /tmp/vz-get-docker.sh
-  sh /tmp/vz-get-docker.sh
-  rm -f /tmp/vz-get-docker.sh
-fi
-if ! docker compose version >/dev/null 2>&1; then
-  echo "Docker Compose plugin is missing. Install docker-compose-plugin and rerun." >&2
-  exit 1
-fi
+REPO_URL="https://raw.githubusercontent.com/RVVZBRO/windowsvps/vz-neptunnel-dotnet"
+INSTALL_DIR="/opt/vz-relay"
+SERVICE_USER="vzrelay"
+PORT="45000"
 
-if [[ -d "$INSTALL_DIR/.git" ]]; then
-  git -C "$INSTALL_DIR" pull --ff-only
-else
-  git clone --depth 1 https://github.com/sudo-ds/porthole.git "$INSTALL_DIR"
-fi
+id "$SERVICE_USER" >/dev/null 2>&1 || useradd --system --home "$INSTALL_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"
+install -d -o root -g root -m 0755 "$INSTALL_DIR"
+curl -fsSL "$REPO_URL/relay/main.go" -o "$INSTALL_DIR/main.go"
+curl -fsSL "$REPO_URL/relay/go.mod" -o "$INSTALL_DIR/go.mod"
 
 cd "$INSTALL_DIR"
-if [[ ! -f .env ]]; then
-  ./scripts/setup-docker-server.sh --public-host "$PUBLIC_HOST"
-fi
-chmod 600 .env
+GOTOOLCHAIN=local go build -trimpath -ldflags="-s -w" -o vz-relay .
+install -o root -g root -m 0755 vz-relay "$INSTALL_DIR/vz-relay"
 
-for entry in "PORTHOLE_CONTROL_PORT=$CONTROL_PORT" "PORTHOLE_MIN_PORT=$MIN_PORT" "PORTHOLE_MAX_PORT=$MAX_PORT"; do
-  key="${entry%%=*}"
-  value="${entry#*=}"
-  if grep -q "^$key=" .env; then
-    sed -i "s|^$key=.*|$key=$value|" .env
-  else
-    printf '%s\n' "$entry" >> .env
-  fi
-done
-# Pin the upstream public image to the same Porthole release bundled in VZ.
-if grep -q '^PORTHOLE_IMAGE=' .env; then
-  sed -i 's|^PORTHOLE_IMAGE=.*|PORTHOLE_IMAGE=ghcr.io/sudo-ds/porthole:v0.5.12|' .env
-else
-  printf 'PORTHOLE_IMAGE=ghcr.io/sudo-ds/porthole:v0.5.12\n' >> .env
-fi
-chmod 600 .env
+cat >/etc/systemd/system/vz-relay.service <<EOF
+[Unit]
+Description=VZ Multiplayer UDP Relay
+After=network-online.target
+Wants=network-online.target
 
-# UFW is the guest firewall. Oracle's cloud VCN Security List / NSG must
-# separately allow these ports (instructions printed below).
+[Service]
+Type=simple
+User=$SERVICE_USER
+Group=$SERVICE_USER
+WorkingDirectory=$INSTALL_DIR
+ExecStart=$INSTALL_DIR/vz-relay -listen 0.0.0.0:$PORT -max-rooms 128 -max-joiners 12
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 ufw allow OpenSSH
-ufw allow "$CONTROL_PORT/tcp"
-ufw allow "$MIN_PORT:$MAX_PORT/tcp"
-ufw allow "$MIN_PORT:$MAX_PORT/udp"
+ufw allow "$PORT/udp"
 ufw --force enable
-
-docker compose pull
-docker compose up -d
-sleep 3
-if ! docker compose ps --status running --quiet | grep -q .; then
-  docker compose logs --tail=80 porthole || true
-  echo "Porthole did not stay running; review logs above." >&2
+systemctl daemon-reload
+systemctl enable --now vz-relay
+sleep 2
+if ! systemctl is-active --quiet vz-relay; then
+  journalctl -u vz-relay -n 80 --no-pager || true
+  echo "VZ relay did not start. See logs above." >&2
   exit 1
 fi
 
+PUBLIC_IP="$(curl -4 -fsS --max-time 10 https://api.ipify.org || true)"
 echo
-echo "VZ relay is running at $PUBLIC_HOST"
-echo "Control listener: $PUBLIC_HOST:$CONTROL_PORT"
-echo "Tunnel port range: $MIN_PORT-$MAX_PORT (TCP and UDP)"
+echo "VZ UDP relay is running."
+echo "Public endpoint: \${PUBLIC_IP:-YOUR_PUBLIC_IPV4}:$PORT"
 echo
-echo "IMPORTANT — Add inbound rules to the Oracle VCN Security List or NSG:"
-echo "  TCP $CONTROL_PORT"
-echo "  TCP $MIN_PORT-$MAX_PORT"
-echo "  UDP $MIN_PORT-$MAX_PORT"
-echo "Use source 0.0.0.0/0 for tunnel traffic. Restrict the control port and SSH where practical."
+echo "NEXT — In Oracle Cloud Networking, add an INGRESS rule:"
+echo "  Source: 0.0.0.0/0"
+echo "  Protocol: UDP"
+echo "  Destination port: $PORT"
+echo "The VM firewall is already configured; the Oracle VCN/NSG firewall is separate."
 echo
-echo "After saving the Oracle rules, print the private VZ relay code:"
-echo "  cd $INSTALL_DIR && sudo docker compose run --rm porthole invite"
+echo "After the Oracle ingress rule is saved, update relay/endpoint.txt in the"
+echo "RVVZBRO/windowsvps repository to:"
+echo "  \${PUBLIC_IP:-YOUR_PUBLIC_IPV4}:$PORT"
+echo "VZ clients will discover that endpoint automatically from the repository."
 echo
-echo "Paste the porthole1_... code into VZ > Host Session. Treat it like a password."
+echo "Service commands:"
+echo "  sudo systemctl status vz-relay"
+echo "  sudo journalctl -u vz-relay -f"
