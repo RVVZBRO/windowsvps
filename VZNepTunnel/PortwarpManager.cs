@@ -7,11 +7,28 @@ internal static class PortwarpManager
     private static readonly string InstallDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VZ NepTunnel", "Portwarp");
     private static readonly string ExePath = Path.Combine(InstallDir, "pwrp.exe");
     private const string DownloadsPage = "https://portwarp.com/downloads";
-    public static string ExecutablePath => ExePath;
+    public static string ExecutablePath => ResolveExecutable();
+
+    private static string ResolveExecutable()
+    {
+        if (File.Exists(ExePath)) return ExePath;
+        string? path = Environment.GetEnvironmentVariable("PATH");
+        if (!string.IsNullOrWhiteSpace(path))
+        {
+            foreach (string folder in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                string candidate = Path.Combine(folder.Trim('"'), "pwrp.exe");
+                if (File.Exists(candidate)) return candidate;
+            }
+        }
+        return ExePath;
+    }
 
     public static Task<string> InstallOrUpdateAsync()
     {
         Directory.CreateDirectory(InstallDir);
+        string existing = ResolveExecutable();
+        if (File.Exists(existing)) return Task.FromResult(existing);
         if (!File.Exists(ExePath))
         {
             Process.Start(new ProcessStartInfo(DownloadsPage) { UseShellExecute = true });
@@ -30,13 +47,14 @@ internal static class PortwarpManager
 
     public static async Task<string> RunAsync(string arguments, TimeSpan timeout, Action<string>? onLine = null, CancellationToken ct = default)
     {
-        if (!File.Exists(ExePath))
+        string executable = ResolveExecutable();
+        if (!File.Exists(executable))
             throw new FileNotFoundException("Install Portwarp CLI first using the setup button in VZ.");
         var start = new ProcessStartInfo
         {
-            FileName = ExePath, Arguments = arguments, UseShellExecute = false,
+            FileName = executable, Arguments = arguments, UseShellExecute = false,
             RedirectStandardOutput = true, RedirectStandardError = true,
-            CreateNoWindow = true, WorkingDirectory = InstallDir
+            CreateNoWindow = true, WorkingDirectory = Path.GetDirectoryName(executable)!
         };
         using var process = new Process { StartInfo = start };
         var output = new System.Text.StringBuilder();
