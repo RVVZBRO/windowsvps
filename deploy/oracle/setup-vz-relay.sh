@@ -68,6 +68,12 @@ for entry in "PORTHOLE_CONTROL_PORT=$CONTROL_PORT" "PORTHOLE_MIN_PORT=$MIN_PORT"
     printf '%s\n' "$entry" >> .env
   fi
 done
+# Pin the upstream public image to the same Porthole release bundled in VZ.
+if grep -q '^PORTHOLE_IMAGE=' .env; then
+  sed -i 's|^PORTHOLE_IMAGE=.*|PORTHOLE_IMAGE=ghcr.io/sudo-ds/porthole:v0.5.12|' .env
+else
+  printf 'PORTHOLE_IMAGE=ghcr.io/sudo-ds/porthole:v0.5.12\n' >> .env
+fi
 chmod 600 .env
 
 # UFW is the guest firewall. Oracle's cloud VCN Security List / NSG must
