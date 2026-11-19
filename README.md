@@ -52,3 +52,14 @@ VZ NepTunnel is a Windows x64 desktop session launcher with Portwarp tunnel cont
 ## Build
 
 GitHub Actions builds the self-contained Windows x64 executable on pushes to `vz-neptunnel-dotnet`. The artifact is named `VZ-NepTunnel-Windows-x64`.
+
+
+---
+
+# VZ Playable Client prototype
+
+A separate Godot 4.5.1 native 3D game prototype now lives in [VZGame](VZGame/README.md). It includes a 3D test arena, WASD movement and jump, ENet host/join networking, GLB/GLTF map import, and an optional Portwarp CLI connect action.
+
+**Build:** GitHub Actions workflow [Build VZ Windows Client](.github/workflows/build-vz-game.yml) exports `VZClient.exe` as the `VZ-Playable-Client-Windows-x64` artifact.
+
+**Compatibility:** This is a new VZ-native runtime, not a Roblox-compatible engine. Roblox `.rbxl` places must be converted to supported glTF content; Luau scripts and Roblox services do not run in this prototype. The Windows export and real multi-PC/Portwarp session still need to pass CI and user testing before this should be called a release.
