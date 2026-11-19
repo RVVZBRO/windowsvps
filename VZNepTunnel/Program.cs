@@ -102,7 +102,7 @@ internal sealed class MainForm : Form
         studioPath = FindStudio();
         if (studioPath != null) studioBox.Text = studioPath;
         Log("VZ is ready. Players need VZ and Roblox Studio only.");
-        SetRelayStatus("Automatic UDP port mapping — UPnP + public IPv4 required", Color.LightSkyBlue);
+        SetRelayStatus("Direct UDP internet hosting (UPnP) with same-LAN fallback", Color.LightSkyBlue);
     }
 
     private TabPage BuildHostTab()
@@ -132,7 +132,7 @@ internal sealed class MainForm : Form
         }, 1, 3);
         layout.Controls.Add(new Label
         {
-            Text = "Share the VZ5 invite with friends. They only need VZ and Roblox Studio — no tunnel app, account, VPS or copy of your map. Your router must allow UPnP and your ISP must provide a public IPv4.",
+            Text = "Share the VZ5 invite with friends. They only need VZ and Roblox Studio — no tunnel app, account, VPS or map copy. UPnP + public IPv4 enables internet hosting; if unavailable, VZ offers a LAN-only invite.",
             AutoSize = true, MaximumSize = new Size(710, 0), ForeColor = Color.Khaki, Margin = new Padding(0, 8, 0, 8)
         }, 1, 4);
         page.Controls.Add(layout);
@@ -592,7 +592,7 @@ internal sealed class MainForm : Form
             hostInviteBox.Clear();
             SetHostStatus("Not hosting", Color.Khaki);
             SetJoinStatus("Not connected", Color.Khaki);
-            SetRelayStatus("Automatic UDP port mapping — UPnP + public IPv4 required", Color.LightSkyBlue);
+            SetRelayStatus("Direct UDP internet hosting (UPnP) with same-LAN fallback", Color.LightSkyBlue);
             Log("VZ session stopped.");
         }
     }
