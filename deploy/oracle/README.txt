@@ -1,53 +1,71 @@
-VZ SELF-HOSTED RELAY — ORACLE ALWAYS FREE
+VZ SHARED RELAY — ORACLE CLOUD ALWAYS FREE
 
-1. Create an Oracle Cloud account:
+This deploys one shared VZ UDP relay. Players do not create VPS accounts,
+install Porthole, configure UPnP, or expose their home IP.
+
+ONE-TIME OWNER SETUP
+
+1. Create the Oracle Cloud Free Tier account:
    https://www.oracle.com/cloud/free/
 
-2. Create an Ubuntu 22.04 or 24.04 VM in your tenancy's home region.
-   Choose Oracle VM.Standard.E2.1.Micro (AMD/x86-64) and assign a public IPv4. Do not use Ampere A1 ARM for this image: the upstream Porthole container build is x86-64.
-   Add an SSH public key.
+2. Create a Linux Ubuntu VM in the tenancy's home region.
+   Recommended: VM.Standard.A1.Flex with 2 OCPUs and 12 GB RAM total
+   (Always Free quota, subject to region capacity). It is ARM64; the setup
+   script compiles the VZ Go relay natively for ARM. An AMD E2.1.Micro
+   x86-64 VM can also run the relay but has much less RAM/CPU.
 
-3. Copy setup-vz-relay.sh to the VM and run:
-   sudo bash setup-vz-relay.sh YOUR_PUBLIC_IP
+   Assign a public IPv4 and add your SSH public key. Do not allocate paid
+   shapes or paid boot-volume capacity.
 
-   The script installs Docker, deploys the open-source Porthole relay,
-   creates a random relay secret, and configures UFW.
+3. Connect to the VM over SSH and run:
+   curl -fsSL https://raw.githubusercontent.com/RVVZBRO/windowsvps/vz-neptunnel-dotnet/deploy/oracle/setup-vz-relay.sh | sudo bash
 
-4. IMPORTANT: Oracle's VCN Security List or Network Security Group is a
-   separate cloud firewall. Add inbound IPv4 rules:
-   - TCP 7835
-   - TCP 10000-20000
-   - UDP 10000-20000
-   Source 0.0.0.0/0 for tunnel ports. Restrict SSH and, where practical,
-   restrict TCP 7835 to your own/friends' IPs.
+   The installer builds a small Go UDP relay, installs a systemd service,
+   and opens UDP port 45000 in the Ubuntu firewall.
 
-5. Print the relay connection code:
-   cd /opt/vz-porthole
-   sudo docker compose run --rm porthole invite
+4. In the Oracle Cloud console, open the VM's VCN Security List or Network
+   Security Group and add an INGRESS rule:
+   - Source CIDR: 0.0.0.0/0
+   - IP Protocol: UDP
+   - Destination port: 45000
 
-6. Paste the porthole1_... code into VZ > Host Session > Relay Connection Code.
-   Keep it private: it contains the relay authentication secret.
+   Oracle's cloud firewall is separate from the Ubuntu firewall.
 
-7. On the host PC, select your local .rbxl/.rbxlx file in VZ and click
-   START HOST SESSION. VZ launches Studio StartServer on UDP 55555, starts
-   a token-protected bridge on UDP 55556, and creates a public UDP tunnel.
-   Share the generated VZ3_ invite with friends, never the porthole1_ code.
+5. The installer prints the VM's public IPv4. In the RVVZBRO/windowsvps
+   repository, edit relay/endpoint.txt to contain exactly:
+   YOUR_PUBLIC_IPV4:45000
 
-8. Friends run VZ, paste the VZ3_ invite into Join Session, and click
-   CONNECT & START CLIENT. They do not need Porthole or a local map copy.
+   Commit that one-line endpoint. VZ downloads this public endpoint
+   configuration automatically; players do not enter it themselves.
 
-FREE-TIER REALITIES
-- Oracle currently documents up to two Always Free AMD VM.Standard.E2.1.Micro
-  instances (each 1/8 OCPU, 1 GB RAM and up to 50 Mbps) plus 10 TB/month
-  outbound transfer. Regional capacity and quotas apply.
-- Oracle may require a payment card at signup. Keep usage within Always Free
-  limits and monitor the tenancy's resource usage.
-- The relay is your VM, not a hosted service operated by VZ.
+6. Download the latest VZ Windows build from the GitHub Actions artifact
+   named VZ-Shared-Relay-Windows-x64. Run VZ.exe.
 
-ROBLOX STUDIO COMPATIBILITY
-VZ follows the unpublished Studio StartServer / StartClient test-session flow
-used by the MIT Studio Bridge reference project. The session uses local UDP
-55555, a token-gated UDP bridge on 55556, and Porthole for the public relay.
-This is not public Roblox Player matchmaking. Studio may change its internal
-startup flags; both PCs need a compatible Studio version. VZ does not upload
-or publish your place.
+PLAYER FLOW
+
+Host:
+- Choose a local .rbxl/.rbxlx file.
+- Click HOST SESSION.
+- Copy the VZ4_ invite and send it to friends.
+
+Join:
+- Open VZ, paste the VZ4_ invite, click JOIN SESSION.
+
+The host keeps VZ and Roblox Studio running for the session. Friends need
+the VZ application and a compatible Roblox Studio installation; they do
+not need a copy of the map. VZ does not publish the map to Roblox.
+
+SECURITY / LIMITS
+
+- The host key is generated per room and is not included in the invite.
+- Each joining PC receives a random client ID and per-client key.
+- Studio UDP payloads are encrypted with AES-256-GCM before relay transport.
+- The invite is a bearer credential: share it only with intended players.
+- The service currently caps rooms and players per room; monitor bandwidth
+  and logs before inviting a large public audience.
+- This is an experimental unpublished Roblox Studio StartServer/StartClient
+  pathway, not official Roblox Player matchmaking. Studio can change its
+  internal flags or networking protocol.
+- Oracle Always Free capacity and policies can change. Always check the
+  Oracle console for resource usage; this project cannot guarantee that
+  Oracle will keep a free VM available in every home region.
