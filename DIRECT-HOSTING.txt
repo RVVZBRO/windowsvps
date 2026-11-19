@@ -4,46 +4,42 @@ HOST A PLACE
 1. Open VZ.exe.
 2. Select your local .rbxl or .rbxlx file.
 3. Click HOST SESSION.
-4. Allow the one-time Windows Firewall rule if Windows asks.
-5. VZ starts the selected place as a Studio test server and opens your own
-   Studio playtest client.
-6. On a compatible router, VZ requests a temporary UDP port mapping and
-   creates a VZ5_ invite. Copy it and send it to friends.
-7. Keep VZ and Roblox Studio running.
+4. VZ starts the selected place as a Studio test server.
+5. VZ opens a separate Studio player client for you.
+6. VZ asks Windows to allow inbound UDP 55556 (one-time administrator approval).
+7. VZ requests a one-hour router port mapping and renews it while hosting.
+8. Copy the VZ5_ invite and share it with friends.
+9. Keep VZ and Roblox Studio running.
 
 JOIN A PLACE
 1. Open VZ.exe.
 2. Open JOIN SESSION.
 3. Paste the host's VZ5_ invite.
 4. Click JOIN SESSION.
+5. VZ checks the host gateway and opens a Studio player client.
 
 WHAT PLAYERS NEED
 - VZ Windows application.
-- Compatible Roblox Studio installed locally.
+- A compatible Roblox Studio installation.
 - A VZ5_ invite from the host.
 
-WHAT THE HOST NETWORK NEEDS
-- Router must support UPnP IGD and have it enabled.
-- ISP must provide a public IPv4 address (not CGNAT).
-- Windows Firewall must allow inbound UDP 55556. VZ asks Windows to add
-  this specific rule with a one-time UAC prompt.
-- VZ removes the router port mapping when the session is stopped.
+NETWORK MODES
+- Internet: router UPnP IGD enabled + public IPv4 from ISP.
+- Same LAN: VZ offers a LAN invite if a public router mapping cannot be made.
+- CGNAT / restrictive NAT: direct internet hosting will not work. You need a
+  public relay or third-party tunnel service. VZ does not create public cloud
+  infrastructure or invent free VM capacity.
 
-IMPORTANT LIMIT
-This build uses direct UDP port mapping. The invite contains the host's
-public IPv4 address and port, so the host's public IP is visible to the
-people who receive the invite. If the router has UPnP disabled or the ISP
-uses CGNAT, remote hosting will not work; the local Studio playtest will
-still start. This build does not include a third-party cloud relay.
-
-A tunnel cannot create a free public VM by itself. A CGNAT-proof relay
-needs an operated public server or a third-party tunnel provider. The
-currently verified no-signup tunnel candidates did not have a client
-binary/source/checksum that could be safely bundled into this package.
+SAFETY
+- VZ adds one specific inbound UDP 55556 firewall rule after Windows asks.
+- The router mapping expires after one hour if VZ crashes; VZ renews it every
+  20 minutes during active hosting and removes it on a normal Stop.
+- The invite contains the endpoint and session key. Only share it with people
+  you trust. Public IPs are visible to invite recipients.
+- The selected map is not uploaded or published to Roblox.
 
 COMPATIBILITY
-VZ launches Roblox Studio's unpublished StartServer/StartClient test flow.
-This is experimental and is not official Roblox Player matchmaking.
-Studio's internal startup flags/networking can change between versions.
-Both computers need compatible Studio versions. VZ does not upload or
-publish the selected local place.
+This uses Roblox Studio's unpublished StartServer/StartClient test pathway,
+not official Roblox Player matchmaking. Studio's internal startup flags and
+network protocol can change. A compiled application has not yet been proven
+to connect two real PCs across two networks.
