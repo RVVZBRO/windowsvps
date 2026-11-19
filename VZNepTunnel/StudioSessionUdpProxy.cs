@@ -43,7 +43,7 @@ internal sealed class HostSessionUdpRelay : IDisposable
                     continue;
 
                 string key = packet.RemoteEndPoint.ToString();
-                var route = _routes.GetOrAdd(key, _ =>
+                var route = _routes.GetOrAdd(key, remoteKey =>
                 {
                     var socket = new UdpClient(AddressFamily.InterNetwork);
                     var created = new PeerRoute(packet.RemoteEndPoint, socket);
@@ -144,7 +144,7 @@ internal sealed class JoinSessionUdpProxy : IDisposable
             {
                 var packet = await _listener.ReceiveAsync(_stop.Token);
                 string key = packet.RemoteEndPoint.ToString();
-                var socket = _routes.GetOrAdd(key, _ =>
+                var socket = _routes.GetOrAdd(key, clientKey =>
                 {
                     var created = new UdpClient(AddressFamily.InterNetwork);
                     _ = Task.Run(() => ReceiveHostRepliesAsync(created, packet.RemoteEndPoint));
