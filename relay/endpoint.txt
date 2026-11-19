@@ -1,0 +1,2 @@
+# Set this to the Oracle VM public IPv4 and UDP port after deployment, e.g. 1.2.3.4:45000
+NOT_CONFIGURED
