@@ -47,6 +47,7 @@ internal sealed class MainForm : Form
     CancellationTokenSource? hostCts;
     string? mapPath;
     string? studioPath;
+    readonly Label selectedMapLabel = new() { AutoSize = true, Text = "No .rbxl / .rbxlx file selected." };
     readonly ComboBox themeChoice = new() { Width = 220, DropDownStyle = ComboBoxStyle.DropDownList };
     readonly ComboBox appearanceChoice = new() { Width = 220, DropDownStyle = ComboBoxStyle.DropDownList };
     readonly CheckBox discordEnabled = new() { Text = "Show VZ on Discord (Rich Presence)", AutoSize = true };
@@ -83,32 +84,19 @@ internal sealed class MainForm : Form
 
     TabPage HomePage()
     {
-        var p = Page("Host");
-        var flow = new FlowLayoutPanel { Dock = DockStyle.Top, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true };
-        flow.Controls.Add(Heading("VZ  //  HOST A GAME"));
-        flow.Controls.Add(new Label { Text = "Choose your local map, then select the dedicated server program that actually runs this game. VZ cannot run an .rbxl file by itself.", AutoSize = true, MaximumSize = new Size(780,0) });
-        flow.Controls.Add(Btn("Choose map…", () => ChooseMap()));
-        flow.Controls.Add(new Label { Text = "Selected map: " + (mapPath == null ? "None" : Path.GetFileName(mapPath)), AutoSize = true });
-        flow.Controls.Add(new Label { Text = "Game server executable:", AutoSize = true });
-        flow.Controls.Add(serverExe);
-        flow.Controls.Add(Btn("Browse server executable…", () => PickExecutable(serverExe)));
-        flow.Controls.Add(new Label { Text = "Server arguments (optional):", AutoSize = true });
-        flow.Controls.Add(serverArgs);
-        flow.Controls.Add(new Label { Text = "Local server port (must match your Portwarp tunnel):", AutoSize = true });
-        flow.Controls.Add(hostPort);
-        flow.Controls.Add(new Label { Text = "Portwarp tunnel name (create it once in your dashboard):", AutoSize = true });
-        flow.Controls.Add(portwarpTunnel);
-        flow.Controls.Add(new Label { Text = "Public address from Portwarp dashboard:", AutoSize = true });
-        flow.Controls.Add(publicEndpoint);
+        var p = Page("Studio Host");
+        var flow = new FlowLayoutPanel { Dock = DockStyle.Top, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Padding = new Padding(8) };
+        flow.Controls.Add(Heading("VZ  //  ROBLOX STUDIO HOST"));
+        flow.Controls.Add(new Label { Text = "Choose your Roblox place file. VZ installs its Studio plugin, opens the map in Roblox Studio, and starts a local multiplayer test.", AutoSize = true, MaximumSize = new Size(780,0) });
+        flow.Controls.Add(Btn("CHOOSE .RBXL / .RBXLX FILE", () => ChooseMap()));
+        flow.Controls.Add(selectedMapLabel);
+        flow.Controls.Add(Btn("OPEN MAP IN ROBLOX STUDIO", () => LaunchMapInStudio()));
+        flow.Controls.Add(Btn("START STUDIO TEST SESSION", () => StartHost()));
         flow.Controls.Add(hostStatus);
-        flow.Controls.Add(Btn("HOST GAME  •  Start server + Portwarp", async () => await StartGameSession()));
-        flow.Controls.Add(new Label { Text = "Share this VZ invite with friends:", AutoSize = true });
-        flow.Controls.Add(inviteCode);
-        flow.Controls.Add(Btn("Create / refresh invite from public address", () => CreateInvite()));
-        flow.Controls.Add(Btn("Copy invite code", () => { if (!string.IsNullOrWhiteSpace(inviteCode.Text)) { Clipboard.SetText(inviteCode.Text); Log("Invite code copied."); } }));
-        flow.Controls.Add(Btn("STOP GAME", () => StopGameSession()));
-        flow.Controls.Add(new Label { Text = "Important: Portwarp forwards traffic to your local server. The selected server executable must support the game protocol and listen on the configured port. Roblox Studio's local test session is not an Internet-capable standalone server.", AutoSize = true, MaximumSize = new Size(780,0), ForeColor = Color.Khaki, Margin = new Padding(0,16,0,0) });
-        p.Controls.Add(flow); return p;
+        flow.Controls.Add(new Label { Text = "What this does: Studio runs one local test server plus simulated player clients (up to 8). It is useful for testing your map and multiplayer scripts.", AutoSize = true, MaximumSize = new Size(780,0), ForeColor = Color.LightGreen, Margin = new Padding(0,12,0,0) });
+        flow.Controls.Add(new Label { Text = "Important: Studio's test server is local to your computer. It does not create a public Roblox server, and a VZ invite code cannot make remote friends join that local test. For Internet play, the place must be published and players must join through Roblox's own game servers.", AutoSize = true, MaximumSize = new Size(780,0), ForeColor = Color.Khaki, Margin = new Padding(0,8,0,0) });
+        p.Controls.Add(flow);
+        return p;
     }
 
     TabPage JoinPage()
@@ -470,7 +458,7 @@ internal sealed class MainForm : Form
     void ChooseMap()
     {
         using var d = new OpenFileDialog { Filter = "Roblox place files (*.rbxl;*.rbxlx)|*.rbxl;*.rbxlx|All files (*.*)|*.*" };
-        if (d.ShowDialog() == DialogResult.OK) { mapPath = d.FileName; Log("Selected map: " + mapPath); }
+        if (d.ShowDialog() == DialogResult.OK) { mapPath = d.FileName; selectedMapLabel.Text = "Selected map: " + mapPath; Log("Selected map: " + mapPath); }
     }
 
     void StartHost()
