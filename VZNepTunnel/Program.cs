@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Drawing;
 using System.Net;
@@ -6,7 +5,6 @@ using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using System.Windows.Forms;
 
 namespace VZNepTunnel;
@@ -35,7 +33,7 @@ internal sealed class MainForm : Form
     private string? placePath;
     private string? studioPath;
     private HostSessionUdpGateway? hostGateway;
-    private OpenPortTunnelHost? hostTunnel;
+    private UpnpPortMapping? portMapping;
     private DirectJoinUdpProxy? joinProxy;
     private Process? studioServerProcess;
     private Process? studioClientProcess;
@@ -100,7 +98,7 @@ internal sealed class MainForm : Form
         studioPath = FindStudio();
         if (studioPath != null) studioBox.Text = studioPath;
         Log("VZ is ready. Players need VZ and Roblox Studio only.");
-        SetRelayStatus("Bundled OpenPort.io UDP tunnel — no account setup", Color.LightSkyBlue);
+        SetRelayStatus("Automatic UDP port mapping — UPnP + public IPv4 required", Color.LightSkyBlue);
     }
 
     private TabPage BuildHostTab()
@@ -125,12 +123,12 @@ internal sealed class MainForm : Form
 
         layout.Controls.Add(new Label
         {
-            Text = "Choose a local .rbxl/.rbxlx file and click HOST SESSION. VZ starts the selected place directly as a Studio test server, launches your own player client, and opens the bundled UDP tunnel automatically.",
+            Text = "Choose a local .rbxl/.rbxlx file and click HOST SESSION. VZ starts the selected place directly as a Studio test server, launches your own player client, and requests a temporary UDP port mapping from a compatible router.",
             AutoSize = true, MaximumSize = new Size(710, 0), ForeColor = Color.Silver, Margin = new Padding(0, 8, 0, 8)
         }, 1, 3);
         layout.Controls.Add(new Label
         {
-            Text = "Share the VZ5 invite with friends. They only need VZ and Roblox Studio — no tunnel app, account, VPS, router changes or copy of your map. Keep VZ and Studio open while hosting.",
+            Text = "Share the VZ5 invite with friends. They only need VZ and Roblox Studio — no tunnel app, account, VPS or copy of your map. Your router must allow UPnP and your ISP must provide a public IPv4.",
             AutoSize = true, MaximumSize = new Size(710, 0), ForeColor = Color.Khaki, Margin = new Padding(0, 8, 0, 8)
         }, 1, 4);
         page.Controls.Add(layout);
@@ -153,7 +151,7 @@ internal sealed class MainForm : Form
         layout.Controls.Add(buttons, 1, 2);
         layout.Controls.Add(new Label
         {
-            Text = "Paste the host's VZ5 invite and click JOIN SESSION. VZ connects through the host's tunnel and launches the Studio test client. No OpenPort account or separate tunnel app is needed on your PC.",
+            Text = "Paste the host's VZ5 invite and click JOIN SESSION. VZ connects to the host's public UDP endpoint and launches the Studio test client. No tunnel account or separate app is needed on your PC.",
             AutoSize = true, MaximumSize = new Size(710, 0), ForeColor = Color.Silver, Margin = new Padding(0, 8, 0, 8)
         }, 1, 3);
         page.Controls.Add(layout);
@@ -239,7 +237,7 @@ internal sealed class MainForm : Form
 
     private async void StartHostSession()
     {
-        if (hostGateway != null || hostTunnel != null || joinProxy != null ||
+        if (hostGateway != null || portMapping != null || joinProxy != null ||
             (studioServerProcess is { HasExited: false }) || (studioClientProcess is { HasExited: false }))
         {
             MessageBox.Show(this, "A VZ session is already active. Stop it first.", "VZ", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -270,37 +268,39 @@ internal sealed class MainForm : Form
                 Guid.NewGuid().ToString().ToUpperInvariant());
             await Task.Delay(800);
 
-            SetHostStatus("LOCAL PLAYTEST RUNNING — OPENING TUNNEL…", Color.LightGreen);
+            SetHostStatus("LOCAL PLAYTEST RUNNING — MAPPING ROUTER PORT…", Color.Khaki);
             try
             {
                 hostGateway = new HostSessionUdpGateway(roomId, sessionKey);
                 hostGateway.Start();
 
-                string openPortPath = Path.Combine(AppContext.BaseDirectory, "tools", "openport.exe");
-                if (!File.Exists(openPortPath))
-                    throw new FileNotFoundException("The bundled OpenPort tunnel engine is missing from the VZ package.", openPortPath);
+                Log("Checking Windows Firewall for the VZ UDP gateway…");
+                await WindowsFirewall.EnsureUdpRuleAsync(HostSessionUdpGateway.PublicPort, Log);
 
-                Log("Opening the bundled OpenPort.io UDP tunnel (no account login)…");
-                hostTunnel = new OpenPortTunnelHost();
-                var endpoint = await hostTunnel.StartAsync(openPortPath, HostSessionUdpGateway.PublicPort, Log);
-                hostInviteBox.Text = VzInvite.Encode(endpoint.Host, endpoint.Port, roomId, sessionKey);
+                Log("Requesting a temporary UDP port mapping from your router…");
+                portMapping = await UpnpPortMapping.CreateAsync((ushort)HostSessionUdpGateway.PublicPort);
+                string publicHost = portMapping.PublicAddress.ToString();
+                int publicPort = portMapping.ExternalPort;
+                string endpoint = $"{publicHost}:{publicPort}";
+                hostInviteBox.Text = VzInvite.Encode(publicHost, publicPort, roomId, sessionKey);
 
-                SetHostStatus("PLAYTEST + REMOTE TUNNEL LIVE — SHARE INVITE", Color.LightGreen);
-                SetRelayStatus("UDP tunnel connected: " + endpoint, Color.LightGreen);
-                Log("VZ5 invite ready. Share it with friends; keep VZ and Roblox Studio running.");
+                SetHostStatus("PLAYTEST + DIRECT UDP HOSTING LIVE — SHARE INVITE", Color.LightGreen);
+                SetRelayStatus("Direct UDP endpoint: " + endpoint, Color.LightGreen);
+                Log("Router mapping is active at " + endpoint + ". VZ5 invite ready.");
+                Log("Keep VZ and Roblox Studio running. The router mapping is removed when you stop the session.");
             }
-            catch (Exception tunnelError)
+            catch (Exception networkError)
             {
-                try { hostTunnel?.Dispose(); } catch { }
-                hostTunnel = null;
+                try { portMapping?.Dispose(); } catch { }
+                portMapping = null;
                 try { hostGateway?.Dispose(); } catch { }
                 hostGateway = null;
 
-                SetHostStatus("LOCAL PLAYTEST ONLY — TUNNEL UNAVAILABLE", Color.Khaki);
-                SetRelayStatus("Tunnel unavailable — local playtest still running", Color.Khaki);
-                Log("The local Studio playtest is running, but the public UDP tunnel did not come up: " + tunnelError.Message);
+                SetHostStatus("LOCAL PLAYTEST ONLY — DIRECT HOSTING UNAVAILABLE", Color.Khaki);
+                SetRelayStatus("Direct UDP unavailable — UPnP/public IPv4 required", Color.Khaki);
+                Log("Local Studio playtest is running, but direct remote access is unavailable: " + networkError.Message);
                 MessageBox.Show(this,
-                    "Your selected place is running in a local Studio playtest, and your own player client has opened.\n\nRemote friends cannot join until the OpenPort UDP tunnel connects. No Oracle VM or account setup is required by VZ.\n\n" + tunnelError.Message,
+                    "Your selected place and your own Studio test client are running locally.\n\nRemote hosting needs a router that supports UPnP and a public IPv4 from your ISP. If your ISP uses CGNAT, this direct method cannot work.\n\n" + networkError.Message,
                     "VZ — Local playtest is running",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
@@ -317,7 +317,7 @@ internal sealed class MainForm : Form
 
     private async void JoinSession()
     {
-        if (hostGateway != null || hostTunnel != null || joinProxy != null ||
+        if (hostGateway != null || portMapping != null || joinProxy != null ||
             (studioServerProcess is { HasExited: false }) || (studioClientProcess is { HasExited: false }))
         {
             MessageBox.Show(this, "A VZ session is already active. Stop it first.", "VZ", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -396,8 +396,8 @@ internal sealed class MainForm : Form
     {
         try { hostGateway?.Dispose(); } catch (Exception ex) { Log("Host gateway cleanup warning: " + ex.Message); }
         hostGateway = null;
-        try { hostTunnel?.Dispose(); } catch (Exception ex) { Log("OpenPort cleanup warning: " + ex.Message); }
-        hostTunnel = null;
+        try { portMapping?.Dispose(); } catch (Exception ex) { Log("Router mapping cleanup warning: " + ex.Message); }
+        portMapping = null;
         try { joinProxy?.Dispose(); } catch (Exception ex) { Log("Join proxy cleanup warning: " + ex.Message); }
         joinProxy = null;
 
@@ -409,7 +409,7 @@ internal sealed class MainForm : Form
             hostInviteBox.Clear();
             SetHostStatus("Not hosting", Color.Khaki);
             SetJoinStatus("Not connected", Color.Khaki);
-            SetRelayStatus("Bundled OpenPort.io UDP tunnel — no account setup", Color.LightSkyBlue);
+            SetRelayStatus("Automatic UDP port mapping — UPnP + public IPv4 required", Color.LightSkyBlue);
             Log("VZ session stopped.");
         }
     }
@@ -572,143 +572,6 @@ internal static class VzTunnelProtocol
             return plain;
         }
         catch (CryptographicException) { return null; }
-    }
-}
-
-internal sealed class OpenPortTunnelHost : IDisposable
-{
-    private static readonly Regex ForwardLine = new(
-        @"Now forwarding remote port\s+(?<endpoint>\S+)\s+to localhost:55556(?<mode>.*)$",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
-    private readonly TaskCompletionSource<OpenPortEndpoint> _ready =
-        new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private readonly StringBuilder _recent = new();
-    private readonly object _recentLock = new();
-    private Process? _process;
-    private Action<string>? _log;
-    private bool _disposed;
-
-    public async Task<OpenPortEndpoint> StartAsync(string executable, int localPort, Action<string> log)
-    {
-        if (!File.Exists(executable)) throw new FileNotFoundException("The bundled OpenPort tunnel engine was not found.", executable);
-        if (_process != null) throw new InvalidOperationException("The OpenPort tunnel is already running.");
-        _log = log;
-
-        string dataRoot = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "VZ", "OpenPort");
-        string openPortHome = Path.Combine(dataRoot, ".openport");
-        Directory.CreateDirectory(openPortHome);
-
-        string databasePath = Path.Combine(openPortHome, "openport.db");
-        var start = new ProcessStartInfo
-        {
-            FileName = executable,
-            WorkingDirectory = Path.GetDirectoryName(executable)!,
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true,
-            WindowStyle = ProcessWindowStyle.Hidden
-        };
-        // The upstream client stores its generated SSH identity under $HOME/.openport.
-        // Keep it inside VZ so this app never reads or changes the user's normal SSH keys.
-        start.Environment["HOME"] = dataRoot;
-        start.ArgumentList.Add("--ip-link-protection=False");
-        start.ArgumentList.Add("--database");
-        start.ArgumentList.Add(databasePath);
-        start.ArgumentList.Add("--keep-alive");
-        start.ArgumentList.Add("30");
-        start.ArgumentList.Add(localPort.ToString());
-
-        var process = new Process { StartInfo = start, EnableRaisingEvents = true };
-        process.OutputDataReceived += (_, e) => { if (e.Data != null) HandleLine(e.Data); };
-        process.ErrorDataReceived += (_, e) => { if (e.Data != null) HandleLine(e.Data); };
-        process.Exited += (_, _) =>
-        {
-            if (!_ready.Task.IsCompleted)
-                _ready.TrySetException(new InvalidOperationException("OpenPort exited before creating the UDP tunnel. " + RecentOutput()));
-        };
-
-        if (!process.Start()) throw new InvalidOperationException("Could not start the bundled OpenPort tunnel engine.");
-        _process = process;
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-
-        try
-        {
-            return await _ready.Task.WaitAsync(TimeSpan.FromSeconds(50));
-        }
-        catch (TimeoutException)
-        {
-            throw new TimeoutException("OpenPort did not report an active TCP + UDP tunnel within 50 seconds. " + RecentOutput());
-        }
-    }
-
-    private void HandleLine(string raw)
-    {
-        string line = Regex.Replace(raw, @"\x1B\[[0-9;]*m", "").Trim();
-        if (line.Length == 0) return;
-        lock (_recentLock)
-        {
-            _recent.AppendLine(line);
-            if (_recent.Length > 6000) _recent.Remove(0, _recent.Length - 6000);
-        }
-        _log?.Invoke("OpenPort: " + line);
-
-        if (line.Contains("does not support UDP forwarding", StringComparison.OrdinalIgnoreCase) ||
-            line.Contains("UDP forwarding not available", StringComparison.OrdinalIgnoreCase))
-        {
-            _ready.TrySetException(new InvalidOperationException("The OpenPort server did not enable UDP forwarding. VZ requires UDP, not TCP-only tunneling."));
-            return;
-        }
-
-        var match = ForwardLine.Match(line);
-        if (!match.Success) return;
-        if (!match.Groups["mode"].Value.Contains("(tcp & udp)", StringComparison.OrdinalIgnoreCase))
-        {
-            _ready.TrySetException(new InvalidOperationException("OpenPort created a tunnel, but its status did not confirm UDP forwarding."));
-            return;
-        }
-
-        string endpoint = match.Groups["endpoint"].Value.Trim();
-        int separator = endpoint.LastIndexOf(':');
-        if (separator <= 0 || !int.TryParse(endpoint[(separator + 1)..], out int port) || port is < 1 or > 65535)
-        {
-            _ready.TrySetException(new FormatException("OpenPort reported an invalid public address: " + endpoint));
-            return;
-        }
-
-        string host = endpoint[..separator].Trim('[', ']');
-        if (string.IsNullOrWhiteSpace(host))
-        {
-            _ready.TrySetException(new FormatException("OpenPort reported an empty public hostname."));
-            return;
-        }
-        _ready.TrySetResult(new OpenPortEndpoint(host, port));
-    }
-
-    private string RecentOutput()
-    {
-        lock (_recentLock) return _recent.ToString();
-    }
-
-    public void Dispose()
-    {
-        if (_disposed) return;
-        _disposed = true;
-        try
-        {
-            if (_process is { HasExited: false })
-            {
-                _process.Kill(true);
-                _process.WaitForExit(3000);
-            }
-        }
-        catch { }
-        _process?.Dispose();
-        _process = null;
     }
 }
 
@@ -987,5 +850,53 @@ internal sealed class DirectJoinUdpProxy : IDisposable
         _remote.Dispose();
         _local.Dispose();
         _sendLock.Dispose();
+    }
+}
+internal static class WindowsFirewall
+{
+    private const string RuleName = "VZ Studio Session UDP";
+
+    public static async Task EnsureUdpRuleAsync(int port, Action<string> log)
+    {
+        if (port is < 1 or > 65535) throw new ArgumentOutOfRangeException(nameof(port));
+        var check = new ProcessStartInfo
+        {
+            FileName = "netsh.exe",
+            Arguments = $"advfirewall firewall show rule name=\"{RuleName}\"",
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        using (var proc = Process.Start(check) ?? throw new InvalidOperationException("Could not check Windows Firewall rules."))
+        {
+            string output = await proc.StandardOutput.ReadToEndAsync();
+            await proc.WaitForExitAsync();
+            if (proc.ExitCode == 0 && output.Contains(RuleName, StringComparison.OrdinalIgnoreCase))
+            {
+                log("Windows Firewall rule already exists.");
+                return;
+            }
+        }
+
+        var elevated = new ProcessStartInfo
+        {
+            FileName = "netsh.exe",
+            Arguments = $"advfirewall firewall add rule name=\"{RuleName}\" dir=in action=allow protocol=UDP localport={port} profile=private,public",
+            UseShellExecute = true,
+            Verb = "runas",
+            WindowStyle = ProcessWindowStyle.Hidden
+        };
+        try
+        {
+            using var proc = Process.Start(elevated) ?? throw new InvalidOperationException("Windows did not start the firewall rule helper.");
+            await proc.WaitForExitAsync();
+            if (proc.ExitCode != 0) throw new InvalidOperationException("Windows Firewall did not add the inbound VZ UDP rule.");
+            log("Windows Firewall now allows UDP " + port + ".");
+        }
+        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
+        {
+            throw new InvalidOperationException("Windows Firewall approval was cancelled. Allow the VZ UDP rule when Windows asks, then start Host again.", ex);
+        }
     }
 }
