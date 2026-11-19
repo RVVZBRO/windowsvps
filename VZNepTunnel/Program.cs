@@ -416,7 +416,7 @@ internal sealed class MainForm : Form
         }
     }
 
-    private async Task<string> PreparePortholeAsync()
+    private Task<string> PreparePortholeAsync()
     {
         var bundled = Path.Combine(AppContext.BaseDirectory, "tools", "porthole.exe");
         if (!File.Exists(bundled)) throw new FileNotFoundException("The bundled Porthole tunnel engine is missing. Re-download the complete VZ build ZIP and keep the tools folder next to VZ.exe.", bundled);
@@ -425,7 +425,7 @@ internal sealed class MainForm : Form
         var target = Path.Combine(home, "porthole.exe");
         if (!File.Exists(target) || new FileInfo(target).Length != new FileInfo(bundled).Length)
             File.Copy(bundled, target, true);
-        return target;
+        return Task.FromResult(target);
     }
 
     private async Task WaitForApiAsync(Process process, string webBind, TimeSpan timeout)
@@ -573,7 +573,7 @@ internal sealed class MainForm : Form
 
     private void SetHostStatus(string value, Color color)
     {
-        if (InvokeRequired) { BeginInvoke(() => SetHostStatus(value, color)); return; }
+        if (InvokeRequired) { BeginInvoke(new Action(() => SetHostStatus(value, color))); return; }
         hostStatus.Text = value;
         hostStatus.ForeColor = color;
     }
@@ -581,7 +581,7 @@ internal sealed class MainForm : Form
     private void SafeLog(string message)
     {
         if (closing || IsDisposed) return;
-        if (InvokeRequired) { try { BeginInvoke(() => Log(message)); } catch { } }
+        if (InvokeRequired) { try { BeginInvoke(new Action(() => Log(message))); } catch { } }
         else Log(message);
     }
 
