@@ -26,7 +26,9 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
-          godot --headless --path VZGame --export-release "Windows Desktop" dist/VZClient.exe
+          godot --headless --path VZGame --export-release "Windows Desktop" ../dist/VZClient.exe
+          if (!(Test-Path dist/VZClient.exe)) { Get-ChildItem -Path . -Filter VZClient.exe -Recurse | Format-Table FullName,Length; throw "VZClient.exe was not created at dist/VZClient.exe" }
+          Get-Item dist/VZClient.exe | Format-Table FullName,Length
       - name: Upload VZClient.exe
         uses: actions/upload-artifact@v4
         with:
