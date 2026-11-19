@@ -28,9 +28,13 @@ VZ SELF-HOSTED RELAY — ORACLE ALWAYS FREE
 6. Paste the porthole1_... code into VZ > Host Session > Relay Connection Code.
    Keep it private: it contains the relay authentication secret.
 
-7. Start a compatible local TCP/UDP service on your PC. Set the matching
-   local port in VZ, choose TCP, UDP or both, and click START HOST TUNNEL.
-   Share the VZ2_ invite, not the private porthole1_ relay code.
+7. On the host PC, select your local .rbxl/.rbxlx file in VZ and click
+   START HOST SESSION. VZ launches Studio StartServer on UDP 55555, starts
+   a token-protected bridge on UDP 55556, and creates a public UDP tunnel.
+   Share the generated VZ3_ invite with friends, never the porthole1_ code.
+
+8. Friends run VZ, paste the VZ3_ invite into Join Session, and click
+   CONNECT & START CLIENT. They do not need Porthole or a local map copy.
 
 FREE-TIER REALITIES
 - Oracle currently documents up to two Always Free AMD VM.Standard.E2.1.Micro
@@ -40,8 +44,10 @@ FREE-TIER REALITIES
   limits and monitor the tenancy's resource usage.
 - The relay is your VM, not a hosted service operated by VZ.
 
-ROBLOX STUDIO LIMIT
-The tunnel forwards raw TCP/UDP. It does not change Roblox Studio's network
-protocol or turn Studio local test into a public Roblox server. Use it only
-with a service/client that actually accepts the forwarded endpoint. VZ does
-not publish your place.
+ROBLOX STUDIO COMPATIBILITY
+VZ follows the unpublished Studio StartServer / StartClient test-session flow
+used by the MIT Studio Bridge reference project. The session uses local UDP
+55555, a token-gated UDP bridge on 55556, and Porthole for the public relay.
+This is not public Roblox Player matchmaking. Studio may change its internal
+startup flags; both PCs need a compatible Studio version. VZ does not upload
+or publish your place.
