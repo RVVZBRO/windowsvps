@@ -260,6 +260,9 @@ internal sealed class MainForm : Form
         try
         {
             StopSession();
+            SetHostStatus("Checking shared relay…", Color.Khaki);
+            var endpoint = await RelayEndpointResolver.ResolveAsync();
+
             SetHostStatus("Starting Studio…", Color.Khaki);
             byte[] roomId = RandomNumberGenerator.GetBytes(16);
             byte[] hostKey = RandomNumberGenerator.GetBytes(16);
@@ -283,7 +286,6 @@ internal sealed class MainForm : Form
             studioClientProcess = LaunchStudioClient(hostClientParentGuid, hostClientPlayGuid);
             await Task.Delay(800);
 
-            var endpoint = await RelayEndpointResolver.ResolveAsync();
             Log("Connecting to the VZ relay at " + endpoint + "…");
             hostRelay = new HostSessionUdpRelay(endpoint, roomId, hostKey, sessionKey);
             await hostRelay.StartAsync();
