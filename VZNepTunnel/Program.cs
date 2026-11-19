@@ -38,6 +38,7 @@ internal sealed class MainForm : Form
     private Process? studioServerProcess;
     private Process? studioClientProcess;
     private bool closing;
+    private bool sessionStarting;
 
     public MainForm()
     {
@@ -237,6 +238,11 @@ internal sealed class MainForm : Form
 
     private async void StartHostSession()
     {
+        if (sessionStarting)
+        {
+            MessageBox.Show(this, "VZ is already starting a session.", "VZ", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
         if (hostGateway != null || portMapping != null || joinProxy != null ||
             (studioServerProcess is { HasExited: false }) || (studioClientProcess is { HasExited: false }))
         {
@@ -245,6 +251,7 @@ internal sealed class MainForm : Form
         }
         if (!ValidateStudio(requirePlace: true)) return;
 
+        sessionStarting = true;
         try
         {
             StopSession();
@@ -256,11 +263,12 @@ internal sealed class MainForm : Form
             string serverParentGuid = Guid.NewGuid().ToString().ToUpperInvariant();
             string serverPlayGuid = Guid.NewGuid().ToString().ToUpperInvariant();
 
+            if (IsUdpPortInUse(HostSessionUdpGateway.StudioPort))
+                throw new InvalidOperationException("Local UDP port 55555 is already in use. Stop the program using it, then try Host again.");
+
             Log("Starting Roblox Studio directly with the selected local place file…");
             studioServerProcess = LaunchStudioServer(serverParentGuid, serverPlayGuid);
-            await Task.Delay(5000);
-            if (studioServerProcess.HasExited)
-                throw new InvalidOperationException("Roblox Studio's StartServer process exited. Check the selected file and Studio installation.");
+            await WaitForStudioServerAsync(studioServerProcess, HostSessionUdpGateway.StudioPort, TimeSpan.FromSeconds(25));
 
             Log("Launching your own Studio playtest client…");
             studioClientProcess = LaunchStudioClient(
@@ -313,10 +321,19 @@ internal sealed class MainForm : Form
             SetHostStatus("Could not start playtest", Color.OrangeRed);
             MessageBox.Show(this, ex.Message, "VZ host error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
+        finally
+        {
+            sessionStarting = false;
+        }
     }
 
     private async void JoinSession()
     {
+        if (sessionStarting)
+        {
+            MessageBox.Show(this, "VZ is already starting a session.", "VZ", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
         if (hostGateway != null || portMapping != null || joinProxy != null ||
             (studioServerProcess is { HasExited: false }) || (studioClientProcess is { HasExited: false }))
         {
@@ -325,6 +342,7 @@ internal sealed class MainForm : Form
         }
         if (!ValidateStudio(requirePlace: false)) return;
 
+        sessionStarting = true;
         try
         {
             var invite = VzInvite.Decode(joinInviteBox.Text.Trim());
@@ -348,6 +366,44 @@ internal sealed class MainForm : Form
             SetJoinStatus("Could not join session", Color.OrangeRed);
             MessageBox.Show(this, ex.Message, "VZ join error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
+        finally
+        {
+            sessionStarting = false;
+        }
+    }
+
+    private static bool IsUdpPortInUse(int port)
+    {
+        using var probe = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp)
+        {
+            ExclusiveAddressUse = true
+        };
+        try
+        {
+            probe.Bind(new IPEndPoint(IPAddress.Loopback, port));
+            return false;
+        }
+        catch (SocketException ex) when (ex.SocketErrorCode == SocketError.AddressAlreadyInUse)
+        {
+            return true;
+        }
+    }
+
+    private async Task WaitForStudioServerAsync(Process server, int port, TimeSpan timeout)
+    {
+        DateTime deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            if (server.HasExited)
+                throw new InvalidOperationException("Roblox Studio's StartServer process exited before opening UDP port " + port + ".");
+            if (IsUdpPortInUse(port))
+            {
+                Log("Studio test server has bound UDP port " + port + ".");
+                return;
+            }
+            await Task.Delay(250);
+        }
+        throw new TimeoutException("Roblox Studio did not bind UDP port " + port + " within " + timeout.TotalSeconds + " seconds. Check whether this Studio version supports the localPlaceFile StartServer task.");
     }
 
     private Process LaunchStudioServer(string parentGuid, string playGuid)
