@@ -62,6 +62,7 @@ internal sealed class MainForm : Form
         Controls.Add(tabs);
         Log("VZ NepTunnel started. LAN UDP testing is available; public Internet tunnelling requires a configured relay VPS.");
         LoadSettings();
+        discordEnabled.CheckedChanged += (_, _) => ApplyDiscord();
         FormClosing += (_, _) => { StopHost(); StopDiscord(); SaveSettings(); };
     }
 
@@ -74,7 +75,8 @@ internal sealed class MainForm : Form
     {
         var p = Page("Host");
         var flow = new FlowLayoutPanel { Dock = DockStyle.Top, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true };
-        flow.Controls.Add(Heading("Host a VZ session"));
+        flow.Controls.Add(new Label { Text = "VZ", AutoSize = true, Font = new Font("Segoe UI", 34, FontStyle.Bold), ForeColor = Color.Silver, Margin = new Padding(0,0,0,0) });
+        flow.Controls.Add(Heading("NEPTUNNEL  //  HOST A SESSION"));
         flow.Controls.Add(new Label { Text = "Choose your Roblox place file (.rbxl / .rbxlx). It stays on this PC.", AutoSize = true });
         var map = Btn("Choose map…", () => ChooseMap());
         flow.Controls.Add(map);
@@ -148,9 +150,10 @@ internal sealed class MainForm : Form
     {
         var p = Page("Settings");
         var flow = new FlowLayoutPanel { Dock = DockStyle.Top, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true };
-        flow.Controls.Add(Heading("Personalize VZ NepTunnel"));
-        flow.Controls.Add(new Label { Text = "Five interface designs:", AutoSize = true });
-        themeChoice.Items.AddRange(new object[] { "Obsidian", "Carbon", "Arctic Silver", "Violet Pulse", "Crimson Edge" });
+        flow.Controls.Add(new Label { Text = "VZ  //  NEPTUNNEL", AutoSize = true, Font = new Font("Segoe UI", 25, FontStyle.Bold), ForeColor = Color.Silver });
+        flow.Controls.Add(Heading("Personalize your tunnel"));
+        flow.Controls.Add(new Label { Text = "Choose one of five interface designs:", AutoSize = true });
+        themeChoice.Items.AddRange(new object[] { "Chrome", "Midnight", "Neon", "Carbon", "Frost" });
         themeChoice.SelectedItem = selectedTheme;
         themeChoice.SelectedIndexChanged += (_, _) => { selectedTheme = themeChoice.Text; ApplyTheme(); SaveSettings(); };
         flow.Controls.Add(themeChoice);
@@ -161,7 +164,7 @@ internal sealed class MainForm : Form
         flow.Controls.Add(appearanceChoice);
         flow.Controls.Add(new Label { Text = "Discord Rich Presence", AutoSize = true, Font = new Font("Segoe UI", 13, FontStyle.Bold) });
         flow.Controls.Add(discordEnabled);
-        flow.Controls.Add(new Label { Text = "Create an application at discord.com/developers/applications and paste its Application ID. Turn this off any time to hide VZ activity.", AutoSize = true, MaximumSize = new Size(740,0) });
+        flow.Controls.Add(new Label { Text = "Use your VZ Discord Application ID below. Discord desktop must be running and allow activity sharing. Turn this switch off to immediately clear VZ from your Discord profile.", AutoSize = true, MaximumSize = new Size(740,0) });
         flow.Controls.Add(discordAppId);
         flow.Controls.Add(Btn("Apply Discord settings", () => ApplyDiscord()));
         flow.Controls.Add(discordState);
@@ -200,9 +203,12 @@ internal sealed class MainForm : Form
     {
         bool dark = appearance == "Dark" || (appearance == "System" && IsSystemDark());
         Color accent = selectedTheme switch {
-            "Carbon" => Color.FromArgb(90,100,115), "Arctic Silver" => Color.FromArgb(85,145,175),
-            "Violet Pulse" => Color.FromArgb(125,75,190), "Crimson Edge" => Color.FromArgb(175,55,65),
-            _ => Color.FromArgb(130,135,150)
+            "Chrome" => Color.FromArgb(150,155,165),
+            "Midnight" => Color.FromArgb(55,65,90),
+            "Neon" => Color.FromArgb(0,170,155),
+            "Carbon" => Color.FromArgb(75,82,92),
+            "Frost" => Color.FromArgb(105,165,205),
+            _ => Color.FromArgb(150,155,165)
         };
         BackColor = dark ? Color.FromArgb(19,21,27) : Color.FromArgb(238,240,244);
         ForeColor = dark ? Color.Gainsboro : Color.FromArgb(30,34,42);
@@ -233,7 +239,7 @@ internal sealed class MainForm : Form
         try {
             discordClient = new DiscordRpcClient(id);
             discordClient.Initialize();
-            discordClient.SetPresence(new RichPresence { Details = "Using VZ NepTunnel", State = "Preparing a VZ session", Assets = new Assets { LargeImageText = "VZ NepTunnel" }, Timestamps = Timestamps.Now });
+            discordClient.SetPresence(new RichPresence { Details = "VZ NepTunnel is open", State = "Ready to host or join", Assets = new Assets { LargeImageText = "VZ NepTunnel" }, Timestamps = Timestamps.Now });
             discordState.Text = "Enabled — VZ activity is visible while the app is open.";
             Log("Discord Rich Presence initialized.");
         } catch (Exception ex) { StopDiscord(); discordState.Text = "Discord connection failed: " + ex.Message; Log("Discord RPC: " + ex.Message); }
