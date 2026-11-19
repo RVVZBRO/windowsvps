@@ -104,6 +104,7 @@ internal sealed class MainForm : Form
         flow.Controls.Add(Btn("HOST GAME  •  Start server + Portwarp", async () => await StartGameSession()));
         flow.Controls.Add(new Label { Text = "Share this VZ invite with friends:", AutoSize = true });
         flow.Controls.Add(inviteCode);
+        flow.Controls.Add(Btn("Create / refresh invite from public address", () => CreateInvite()));
         flow.Controls.Add(Btn("Copy invite code", () => { if (!string.IsNullOrWhiteSpace(inviteCode.Text)) { Clipboard.SetText(inviteCode.Text); Log("Invite code copied."); } }));
         flow.Controls.Add(Btn("STOP GAME", () => StopGameSession()));
         flow.Controls.Add(new Label { Text = "Important: Portwarp forwards traffic to your local server. The selected server executable must support the game protocol and listen on the configured port. Roblox Studio's local test session is not an Internet-capable standalone server.", AutoSize = true, MaximumSize = new Size(780,0), ForeColor = Color.Khaki, Margin = new Padding(0,16,0,0) });
@@ -209,6 +210,22 @@ internal sealed class MainForm : Form
             Log(hostStatus.Text);
             MessageBox.Show(ex.Message, "VZ Host");
         }
+    }
+
+    void CreateInvite()
+    {
+        try
+        {
+            if (gameServerProcess is not { HasExited: false })
+                throw new InvalidOperationException("Start the game server first.");
+            if (!TryParseEndpoint(publicEndpoint.Text.Trim(), out var hostName, out var publicPort))
+                throw new FormatException("Enter the public hostname:port shown by Portwarp, for example game.example:12345.");
+            inviteCode.Text = InviteCodec.Create(hostName, publicPort);
+            hostStatus.Text = "HOSTING — INVITE READY";
+            hostStatus.ForeColor = Color.LightGreen;
+            Log("Invite created for " + hostName + ":" + publicPort);
+        }
+        catch (Exception ex) { MessageBox.Show(ex.Message, "VZ Invite"); }
     }
 
     void StopGameSession()
