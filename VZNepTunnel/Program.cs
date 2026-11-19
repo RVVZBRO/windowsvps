@@ -149,7 +149,7 @@ internal sealed class MainForm : Form
 
     async Task InstallPortwarp()
     {
-        try { UseWaitCursor = true; string path = await PortwarpManager.InstallOrUpdateAsync(); portwarpStatus.Text = "Portwarp CLI installed: " + path; Log("Portwarp CLI installed and SHA-256 verified."); }
+        try { UseWaitCursor = true; string path = await PortwarpManager.InstallOrUpdateAsync(); portwarpStatus.Text = "Portwarp CLI installed: " + path; Log("Portwarp CLI copied into the VZ-managed tools folder."); }
         catch (Exception ex) { portwarpStatus.Text = "Portwarp installation failed: " + ex.Message; Log(portwarpStatus.Text); MessageBox.Show(ex.Message, "Portwarp"); }
         finally { UseWaitCursor = false; }
     }
@@ -286,20 +286,6 @@ internal sealed class MainForm : Form
     {
         try { discordClient?.ClearPresence(); discordClient?.Dispose(); } catch { }
         discordClient = null;
-    }
-
-    async Task CreateRelayVps()
-    {
-        try
-        {
-            UseWaitCursor = true;
-            var result = await new HetznerProvisioner().CreateRelayAsync(hetznerToken.Text, hetznerLocation.Text, hetznerType.Text);
-            relayIp.Text = result.ip;
-            Log($"Hetzner relay server created: ID {result.id}, IP {result.ip}. Allow several minutes for cloud-init.");
-            MessageBox.Show($"Relay VPS created!\nIP: {result.ip}\nUDP port: 45000\nServer ID: {result.id}\n\nHetzner charges your account for this server.", "VZ NepTunnel");
-        }
-        catch (Exception ex) { Log("VPS provisioning failed: " + ex.Message); MessageBox.Show(ex.Message, "Hetzner provisioning"); }
-        finally { UseWaitCursor = false; }
     }
 
     async Task TestRelay()
