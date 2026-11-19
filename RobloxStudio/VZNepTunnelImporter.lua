@@ -1,19 +1,19 @@
--- VZ NepTunnel: official Roblox Studio local multiplayer test plugin.
--- StudioTestService is a Studio-only testing API; it does not expose an Internet server.
+-- VZ NepTunnel: Roblox Studio local multiplayer test plugin.
+-- StudioTestService is Studio-only and does not create a public Internet server.
 local StudioTestService = game:GetService("StudioTestService")
 local toolbar = plugin:CreateToolbar("VZ NepTunnel")
 local active = false
 
-local function createTestButton(clientCount)
+local function addButton(clientCount)
     local button = toolbar:CreateButton(
         "VZTest" .. tostring(clientCount),
-        "Run a local Studio server with " .. tostring(clientCount) .. " simulated client(s)",
+        "Start a local Studio server with " .. tostring(clientCount) .. " simulated clients",
         ""
     )
     button.ClickableWhenViewportHidden = true
     button.Click:Connect(function()
         if active then
-            warn("[VZ NepTunnel] A multiplayer test is already running. End it in Studio before starting another.")
+            warn("[VZ NepTunnel] A Studio test is already running. End it before starting another.")
             return
         end
         active = true
@@ -23,9 +23,9 @@ local function createTestButton(clientCount)
                 return StudioTestService:ExecuteMultiplayerTestAsync(clientCount, "VZ NepTunnel")
             end)
             if ok then
-                print("[VZ NepTunnel] Local multiplayer test finished: " .. tostring(result))
+                print("[VZ NepTunnel] Studio multiplayer test ended: " .. tostring(result))
             else
-                warn("[VZ NepTunnel] Could not start/complete Studio test: " .. tostring(result))
+                warn("[VZ NepTunnel] Studio test failed: " .. tostring(result))
             end
             active = false
             button.Enabled = true
@@ -33,8 +33,8 @@ local function createTestButton(clientCount)
     end)
 end
 
-createTestButton(1)
-createTestButton(2)
-createTestButton(4)
-createTestButton(8)
-print("[VZ NepTunnel] Ready. Open Plugins > VZ NepTunnel and choose VZTest1, VZTest2, VZTest4, or VZTest8.")
+addButton(1)
+addButton(2)
+addButton(4)
+addButton(8)
+print("[VZ NepTunnel] Ready: Plugins > VZ NepTunnel > VZTest1 / 2 / 4 / 8.")
