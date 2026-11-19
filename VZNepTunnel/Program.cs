@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
+using System.Security.Cryptography;
 using DiscordRPC;
 
 namespace VZNepTunnel;
@@ -297,6 +298,34 @@ internal sealed class MainForm : Form
         } catch (Exception ex) { MessageBox.Show(ex.Message, "Portwarp"); }
     }
     static string QuoteArg(string value) => "\"" + value.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
+
+    static class InviteCodec
+    {
+        public static string Create(string host, int port)
+        {
+            string payload = Convert.ToBase64String(Encoding.UTF8.GetBytes(host + "|" + port));
+            string code = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(payload)))[..6];
+            return "VZ1-" + code + "-" + payload.TrimEnd('=').Replace('+','-').Replace('/','_');
+        }
+
+        public static (string Host, int Port) Read(string code)
+        {
+            if (!code.StartsWith("VZ1-", StringComparison.OrdinalIgnoreCase))
+                throw new FormatException("This is not a VZ1 invite code.");
+            string[] parts = code.Split('-', 3);
+            if (parts.Length != 3) throw new FormatException("Invite code is incomplete.");
+            string encoded = parts[2].Replace('-','+').Replace('_','/');
+            encoded = encoded.PadRight(encoded.Length + (4 - encoded.Length % 4) % 4, '=');
+            string decoded = Encoding.UTF8.GetString(Convert.FromBase64String(encoded));
+            string[] fields = decoded.Split('|', 2);
+            if (fields.Length != 2 || !TryParseEndpoint(fields[0] + ":" + fields[1], out var host, out var port))
+                throw new FormatException("Invite code contains an invalid endpoint.");
+            string expected = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(parts[2])))[..6];
+            if (!CryptographicOperations.FixedTimeEquals(Encoding.ASCII.GetBytes(expected), Encoding.ASCII.GetBytes(parts[1].ToUpperInvariant())))
+                throw new FormatException("Invite code checksum is invalid.");
+            return (host, port);
+        }
+    }
 
     TabPage SettingsPage()
     {
