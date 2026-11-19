@@ -4,7 +4,7 @@ VZ SELF-HOSTED RELAY — ORACLE ALWAYS FREE
    https://www.oracle.com/cloud/free/
 
 2. Create an Ubuntu 22.04 or 24.04 VM in your tenancy's home region.
-   Choose an Always Free eligible compute shape and assign a public IPv4.
+   Choose Oracle VM.Standard.E2.1.Micro (AMD/x86-64) and assign a public IPv4. Do not use Ampere A1 ARM for this image: the upstream Porthole container build is x86-64.
    Add an SSH public key.
 
 3. Copy setup-vz-relay.sh to the VM and run:
@@ -33,9 +33,9 @@ VZ SELF-HOSTED RELAY — ORACLE ALWAYS FREE
    Share the VZ2_ invite, not the private porthole1_ relay code.
 
 FREE-TIER REALITIES
-- Oracle currently documents Always Free Ampere A1 compute up to 2 OCPUs /
-  12 GB RAM and 10 TB/month outbound transfer. Eligibility, regional host
-  capacity and quotas apply. Oracle can reclaim idle compute under its policy.
+- Oracle currently documents up to two Always Free AMD VM.Standard.E2.1.Micro
+  instances (each 1/8 OCPU, 1 GB RAM and up to 50 Mbps) plus 10 TB/month
+  outbound transfer. Regional capacity and quotas apply.
 - Oracle may require a payment card at signup. Keep usage within Always Free
   limits and monitor the tenancy's resource usage.
 - The relay is your VM, not a hosted service operated by VZ.
