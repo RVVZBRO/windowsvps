@@ -47,7 +47,7 @@ internal sealed class HostSessionUdpRelay : IDisposable
                 {
                     var socket = new UdpClient(AddressFamily.InterNetwork);
                     var created = new PeerRoute(packet.RemoteEndPoint, socket);
-                    _ = Task.Run(() => SendStudioRepliesAsync(created));
+                    Task.Run(() => SendStudioRepliesAsync(created));
                     return created;
                 });
 
@@ -147,7 +147,7 @@ internal sealed class JoinSessionUdpProxy : IDisposable
                 var socket = _routes.GetOrAdd(key, clientKey =>
                 {
                     var created = new UdpClient(AddressFamily.InterNetwork);
-                    _ = Task.Run(() => ReceiveHostRepliesAsync(created, packet.RemoteEndPoint));
+                    Task.Run(() => ReceiveHostRepliesAsync(created, packet.RemoteEndPoint));
                     return created;
                 });
 
