@@ -320,28 +320,42 @@ internal sealed class MainForm : Form
 
     private async void StartHostTunnel()
     {
-        if (tunnelProcess is { HasExited: false })
+        if (tunnelProcess is { HasExited: false } || hostRelay != null)
         {
-            MessageBox.Show(this, "A VZ tunnel is already running. Stop it before starting another.", "VZ", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show(this, "A VZ Studio session is already hosting. Stop it before starting another.", "VZ", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
+        if (!ValidateStudio()) return;
 
         var code = relayCodeBox.Text.Trim();
         if (!code.StartsWith("porthole1_", StringComparison.Ordinal))
         {
-            MessageBox.Show(this, "Paste the Porthole relay connection code. It starts with porthole1_.", "VZ", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return;
-        }
-        if (!ushort.TryParse(localPortBox.Text.Trim(), out var localPort) || localPort == 0)
-        {
-            MessageBox.Show(this, "Enter a valid local port from 1 to 65535.", "VZ", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show(this, "Paste your private Porthole relay connection code. It starts with porthole1_.", "VZ", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
-        string protocol = protocolBox.SelectedIndex switch { 1 => "tcp", 2 => "udp", _ => "both" };
         try
         {
+            StopTunnel();
             var info = DecodePortholeCode(code);
+            string token = Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
+            string parentGuid = Guid.NewGuid().ToString("D").ToUpperInvariant();
+            string playGuid = Guid.NewGuid().ToString("D").ToUpperInvariant();
+
+            Log("Opening the selected local place in Studio...");
+            LaunchPlaceForSession();
+            await Task.Delay(2500);
+
+            Log("Starting Roblox Studio local test server on UDP 55555...");
+            studioServerProcess = LaunchStudioServer(parentGuid, playGuid);
+            await Task.Delay(4000);
+            if (studioServerProcess.HasExited)
+                throw new InvalidOperationException("Roblox Studio's StartServer process exited. Check that Studio is installed and that the selected place opens correctly.");
+
+            Log("Starting token-protected host UDP relay on 0.0.0.0:55556...");
+            hostRelay = new HostSessionUdpRelay(token);
+            hostRelay.Start();
+
             string porthole = await PreparePortholeAsync();
             apiPort = GetFreeTcpPort();
             string webBind = $"127.0.0.1:{apiPort}";
@@ -360,7 +374,6 @@ internal sealed class MainForm : Form
             start.ArgumentList.Add("--web-bind");
             start.ArgumentList.Add(webBind);
 
-            StopTunnel();
             var configPath = Path.Combine(Path.GetDirectoryName(porthole)!, "porthole-client.toml");
             try { if (File.Exists(configPath)) File.Delete(configPath); } catch { }
             tunnelProcess = new Process { StartInfo = start, EnableRaisingEvents = true };
@@ -369,8 +382,8 @@ internal sealed class MainForm : Form
             if (!tunnelProcess.Start()) throw new InvalidOperationException("Porthole could not be started.");
             tunnelProcess.BeginOutputReadLine();
             tunnelProcess.BeginErrorReadLine();
-            Log("Connecting to relay " + info.Host + ":" + info.Port + " …");
-            SetHostStatus("Connecting to relay…", Color.Khaki);
+            Log("Connecting to Porthole relay " + info.Host + ":" + info.Port + " …");
+            SetHostStatus("Connecting to tunnel relay…", Color.Khaki);
 
             await WaitForApiAsync(tunnelProcess, webBind, TimeSpan.FromSeconds(45));
             var before = await GetStatusAsync();
@@ -378,16 +391,16 @@ internal sealed class MainForm : Form
 
             var request = new
             {
-                name = "vz-session",
-                proto = protocol,
-                local = $"127.0.0.1:{localPort}",
+                name = "vz-studio-udp",
+                proto = "udp",
+                local = "127.0.0.1:55556",
                 remote_port = 0,
-                encrypted = encryptBox.Checked,
+                encrypted = false,
                 udp_mtu = 1200
             };
             using var response = await http.PostAsJsonAsync($"http://{webBind}/api/tunnels", request);
             var body = await response.Content.ReadAsStringAsync();
-            if (!response.IsSuccessStatusCode) throw new InvalidOperationException("Porthole rejected the tunnel: " + body);
+            if (!response.IsSuccessStatusCode) throw new InvalidOperationException("Porthole rejected the Studio UDP tunnel: " + body);
 
             TunnelSnapshot? ready = null;
             var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(60);
@@ -396,30 +409,29 @@ internal sealed class MainForm : Form
             {
                 if (tunnelProcess == null || tunnelProcess.HasExited) throw new InvalidOperationException("Porthole exited while creating the tunnel.");
                 var snapshot = await GetStatusAsync();
-                ready = snapshot.Tunnels.FirstOrDefault(t => t.Name == "vz-session");
+                ready = snapshot.Tunnels.FirstOrDefault(t => t.Name == "vz-studio-udp");
                 if (ready?.Error is { Length: > 0 } err) relayError = err;
                 if (ready is { Up: true } && ready.Bindings.Count > 0) break;
                 await Task.Delay(1000);
             }
             if (ready is not { Up: true } || ready.Bindings.Count == 0)
-                throw new TimeoutException(relayError ?? "The relay did not assign a public port within 60 seconds. Check that the relay allows the selected protocol and port range.");
+                throw new TimeoutException(relayError ?? "The relay did not assign a public UDP port within 60 seconds. Check the Oracle cloud firewall allows UDP 10000-20000.");
 
             activeEndpoint = ready.Bindings[0].Public;
-            activeProtocol = protocol;
+            activeProtocol = "udp";
             publicEndpoint.Text = activeEndpoint;
-            var invite = EncodeVzInvite(activeEndpoint, protocol);
-            inviteBox.Text = invite;
-            SetHostStatus("Tunnel is live", Color.LightGreen);
-            Log("Public tunnel is live: " + activeEndpoint + " (" + protocol.ToUpperInvariant() + ")");
-            Log("VZ invite generated. Share the VZ2_ code, never the porthole1_ relay code.");
-            Log("Local destination: 127.0.0.1:" + localPort);
+            inviteBox.Text = EncodeVzInvite(activeEndpoint, token, parentGuid, playGuid);
+            SetHostStatus("Studio session is live", Color.LightGreen);
+            Log("Public UDP tunnel is live: " + activeEndpoint);
+            Log("VZ Studio invite generated. Share the VZ3_ invite, never the porthole1_ relay code.");
+            Log("Studio host server: 127.0.0.1:55555; token relay: 127.0.0.1:55556.");
         }
         catch (Exception ex)
         {
-            SetHostStatus("Tunnel failed: " + ex.Message, Color.OrangeRed);
+            SetHostStatus("Host failed: " + ex.Message, Color.OrangeRed);
             Log("Host failed: " + ex);
             StopTunnel();
-            MessageBox.Show(this, ex.Message, "VZ tunnel error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show(this, ex.Message, "VZ host error", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
 
