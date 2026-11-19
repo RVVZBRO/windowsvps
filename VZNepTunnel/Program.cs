@@ -25,6 +25,15 @@ internal sealed class MainForm : Form
     readonly TextBox roomCode = new() { Width = 300, PlaceholderText = "Shared room code (8+ characters)" };
     readonly TextBox portwarpTunnel = new() { Width = 300, PlaceholderText = "Tunnel name from Portwarp dashboard" };
     readonly TextBox portwarpStatus = new() { Width = 520, ReadOnly = true, Text = "Portwarp is not configured yet." };
+    readonly TextBox serverExe = new() { Width = 430, PlaceholderText = "Dedicated game-server executable (.exe)" };
+    readonly TextBox serverArgs = new() { Width = 430, PlaceholderText = "Optional server arguments; {map} is replaced with selected map path" };
+    readonly TextBox publicEndpoint = new() { Width = 430, PlaceholderText = "Public address from Portwarp dashboard, e.g. game.example.pwrp.cc:12345" };
+    readonly TextBox inviteCode = new() { Width = 520, ReadOnly = true };
+    readonly TextBox inviteInput = new() { Width = 520, PlaceholderText = "VZ1- invite code" };
+    readonly Label joinStatus = new() { AutoSize = true, ForeColor = Color.LightGreen };
+    readonly TextBox clientExe = new() { Width = 430, PlaceholderText = "Game client executable (.exe)" };
+    readonly TextBox clientArgs = new() { Width = 430, PlaceholderText = "Optional client arguments; use {host} and {port}" };
+    Process? gameServerProcess;
     
     
     readonly ComboBox relayRole = new() { Width = 140, DropDownStyle = ComboBoxStyle.DropDownList };
@@ -68,7 +77,7 @@ internal sealed class MainForm : Form
     }
 
     TabPage Page(string title) { var p = new TabPage(title) { BackColor = BackColor, ForeColor = ForeColor, Padding = new Padding(18) }; return p; }
-    Button Btn(string text, Action action) { var b = new Button { Text = text, AutoSize = true, Padding = new Padding(12,7,12,7), BackColor = Color.FromArgb(49,93,160), ForeColor = Color.White, FlatStyle = FlatStyle.Flat }; b.Click += (_,_) => action(); return b; }
+    System.Windows.Forms.Button Btn(string text, Action action) { var b = new Button { Text = text, AutoSize = true, Padding = new Padding(12,7,12,7), BackColor = Color.FromArgb(49,93,160), ForeColor = Color.White, FlatStyle = FlatStyle.Flat }; b.Click += (_,_) => action(); return b; }
     Label Heading(string s) => new() { Text = s, AutoSize = true, Font = new Font("Segoe UI", 19, FontStyle.Bold), ForeColor = Color.White, Margin = new Padding(0,0,0,16) };
     void Log(string s) { if (log.InvokeRequired) { log.BeginInvoke(new Action(() => Log(s))); return; } log.AppendText($"[{DateTime.Now:HH:mm:ss}] {s}{Environment.NewLine}"); }
 
@@ -76,23 +85,28 @@ internal sealed class MainForm : Form
     {
         var p = Page("Host");
         var flow = new FlowLayoutPanel { Dock = DockStyle.Top, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true };
-        flow.Controls.Add(new Label { Text = "VZ", AutoSize = true, Font = new Font("Segoe UI", 34, FontStyle.Bold), ForeColor = Color.Silver, Margin = new Padding(0,0,0,0) });
-        flow.Controls.Add(Heading("NEPTUNNEL  //  HOST A SESSION"));
-        flow.Controls.Add(new Label { Text = "Choose your Roblox place file (.rbxl / .rbxlx). It stays on this PC.", AutoSize = true });
-        var map = Btn("Choose map…", () => ChooseMap());
-        flow.Controls.Add(map);
-        flow.Controls.Add(new Label { Text = "Session status:", AutoSize = true });
-        flow.Controls.Add(hostStatus);
-        flow.Controls.Add(new Label { Text = "Configured port (not proof of a running game server):", AutoSize = true });
+        flow.Controls.Add(Heading("VZ  //  HOST A GAME"));
+        flow.Controls.Add(new Label { Text = "Choose your local map, then select the dedicated server program that actually runs this game. VZ cannot run an .rbxl file by itself.", AutoSize = true, MaximumSize = new Size(780,0) });
+        flow.Controls.Add(Btn("Choose map…", () => ChooseMap()));
+        flow.Controls.Add(new Label { Text = "Selected map: " + (mapPath == null ? "None" : Path.GetFileName(mapPath)), AutoSize = true });
+        flow.Controls.Add(new Label { Text = "Game server executable:", AutoSize = true });
+        flow.Controls.Add(serverExe);
+        flow.Controls.Add(Btn("Browse server executable…", () => PickExecutable(serverExe)));
+        flow.Controls.Add(new Label { Text = "Server arguments (optional):", AutoSize = true });
+        flow.Controls.Add(serverArgs);
+        flow.Controls.Add(new Label { Text = "Local server port (must match your Portwarp tunnel):", AutoSize = true });
         flow.Controls.Add(hostPort);
-        flow.Controls.Add(configuredPort);
-        flow.Controls.Add(Btn("Host selected map in Studio", () => StartHost()));
-        flow.Controls.Add(endpoint);
-        flow.Controls.Add(Btn("Find Roblox Studio", () => FindStudio()));
-        flow.Controls.Add(Btn("Open selected map in Studio", () => OpenMap()));
-        flow.Controls.Add(new Label { Text = "Host installs the VZ Studio plugin and opens your selected place. In Studio, click Plugins > VZ NepTunnel > Start local client session to launch one server and one playable client window. This is a local Studio test, not an Internet join tunnel.", AutoSize = true, MaximumSize = new Size(780,0), ForeColor = Color.Khaki, Margin = new Padding(0,22,0,0) });
-        configuredPort.Text = $"Configured port: {(int)hostPort.Value}";
-        hostPort.ValueChanged += (_, _) => configuredPort.Text = $"Configured port: {(int)hostPort.Value}";
+        flow.Controls.Add(new Label { Text = "Portwarp tunnel name (create it once in your dashboard):", AutoSize = true });
+        flow.Controls.Add(portwarpTunnel);
+        flow.Controls.Add(new Label { Text = "Public address from Portwarp dashboard:", AutoSize = true });
+        flow.Controls.Add(publicEndpoint);
+        flow.Controls.Add(hostStatus);
+        flow.Controls.Add(Btn("HOST GAME  •  Start server + Portwarp", async () => await StartGameSession()));
+        flow.Controls.Add(new Label { Text = "Share this VZ invite with friends:", AutoSize = true });
+        flow.Controls.Add(inviteCode);
+        flow.Controls.Add(Btn("Copy invite code", () => { if (!string.IsNullOrWhiteSpace(inviteCode.Text)) { Clipboard.SetText(inviteCode.Text); Log("Invite code copied."); } }));
+        flow.Controls.Add(Btn("STOP GAME", () => StopGameSession()));
+        flow.Controls.Add(new Label { Text = "Important: Portwarp forwards traffic to your local server. The selected server executable must support the game protocol and listen on the configured port. Roblox Studio's local test session is not an Internet-capable standalone server.", AutoSize = true, MaximumSize = new Size(780,0), ForeColor = Color.Khaki, Margin = new Padding(0,16,0,0) });
         p.Controls.Add(flow); return p;
     }
 
@@ -100,15 +114,17 @@ internal sealed class MainForm : Form
     {
         var p = Page("Join");
         var flow = new FlowLayoutPanel { Dock = DockStyle.Top, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true };
-        flow.Controls.Add(Heading("Join over the Internet"));
-        flow.Controls.Add(new Label { Text = "Enter the public VZ relay address and the room code shared by the host. You do not need the host's home IP or to be on the same Wi-Fi.", AutoSize = true, MaximumSize = new Size(760,0) });
-        flow.Controls.Add(new Label { Text = "Public relay IPv4:", AutoSize = true });
-        flow.Controls.Add(relayIp);
-        flow.Controls.Add(new Label { Text = "Host's room code:", AutoSize = true });
-        flow.Controls.Add(roomCode);
-        relayRole.Items.Clear(); relayRole.Items.AddRange(new object[] { "host", "join" }); relayRole.SelectedItem = "join";
-        flow.Controls.Add(Btn("Connect to public relay", async () => { relayRole.SelectedItem = "join"; await TestRelay(); }));
-        flow.Controls.Add(new Label { Text = "This currently tests public relay registration only. Full Roblox Studio gameplay forwarding is not yet verified, so VZ will not claim that you have joined a playable session.", AutoSize = true, MaximumSize = new Size(760,0), ForeColor = Color.Khaki, Margin = new Padding(0,16,0,0) });
+        flow.Controls.Add(Heading("Join a VZ game"));
+        flow.Controls.Add(new Label { Text = "Paste the VZ invite code shared by the host. VZ decodes the public Portwarp endpoint; it does not reveal the host's home IP.", AutoSize = true, MaximumSize = new Size(760,0) });
+        flow.Controls.Add(inviteInput);
+        flow.Controls.Add(new Label { Text = "Game client executable (if your game requires one):", AutoSize = true });
+        flow.Controls.Add(clientExe);
+        flow.Controls.Add(Btn("Browse game client…", () => PickExecutable(clientExe)));
+        flow.Controls.Add(new Label { Text = "Client arguments (optional; use {host} and {port}):", AutoSize = true });
+        flow.Controls.Add(clientArgs);
+        flow.Controls.Add(Btn("JOIN GAME", () => JoinGameSession()));
+        flow.Controls.Add(joinStatus);
+        flow.Controls.Add(new Label { Text = "VZ invite codes contain the public endpoint, not a matchmaking account or access-control token. Your game server must enforce its own player authentication.", AutoSize = true, MaximumSize = new Size(760,0), ForeColor = Color.Khaki, Margin = new Padding(0,16,0,0) });
         p.Controls.Add(flow); return p;
     }
 
@@ -145,6 +161,106 @@ internal sealed class MainForm : Form
         flow.Controls.Add(Btn("Stop Portwarp tunnel", async () => await StopPortwarp()));
         flow.Controls.Add(new Label { Text = "The public address is shown in your Portwarp dashboard. VZ will not claim a playable session unless a compatible game server is running on the selected local port.", AutoSize = true, MaximumSize = new Size(760,0), ForeColor = Color.Khaki, Margin = new Padding(0,18,0,0) });
         p.Controls.Add(flow); return p;
+    }
+
+    void PickExecutable(TextBox target)
+    {
+        using var d = new OpenFileDialog { Filter = "Windows applications (*.exe)|*.exe|All files (*.*)|*.*", CheckFileExists = true };
+        if (d.ShowDialog() == DialogResult.OK) target.Text = d.FileName;
+    }
+
+    async Task StartGameSession()
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(serverExe.Text) || !File.Exists(serverExe.Text))
+                throw new InvalidOperationException("Choose a real dedicated game-server .exe first. A Roblox .rbxl map file is not a server executable.");
+            if (string.IsNullOrWhiteSpace(portwarpTunnel.Text))
+                throw new InvalidOperationException("Enter the exact Portwarp tunnel name configured in your dashboard.");
+            if (gameServerProcess is { HasExited: false })
+                throw new InvalidOperationException("A VZ game server is already running.");
+            var psi = new ProcessStartInfo { FileName = serverExe.Text, WorkingDirectory = Path.GetDirectoryName(serverExe.Text)!, UseShellExecute = false };
+            string args = serverArgs.Text.Replace("{map}", mapPath ?? "", StringComparison.OrdinalIgnoreCase).Replace("{port}", ((int)hostPort.Value).ToString());
+            if (!string.IsNullOrWhiteSpace(args)) psi.Arguments = args;
+            gameServerProcess = Process.Start(psi) ?? throw new InvalidOperationException("Windows could not start the selected game server.");
+            hostStatus.Text = "SERVER STARTED — CHECKING PORTWARP";
+            hostStatus.ForeColor = Color.Khaki;
+            Log("Game server process started: " + Path.GetFileName(serverExe.Text));
+            await Task.Delay(1500);
+            if (gameServerProcess.HasExited) throw new InvalidOperationException("The game server exited immediately. Check its arguments and logs.");
+            string output = await PortwarpManager.RunAsync("connect " + QuoteArg(portwarpTunnel.Text.Trim()) + " --detach", TimeSpan.FromSeconds(30), line => Log("Portwarp: " + line));
+            Log("Portwarp connect command accepted: " + output.Trim());
+            if (!TryParseEndpoint(publicEndpoint.Text.Trim(), out var hostName, out var publicPort))
+            {
+                hostStatus.Text = "SERVER RUNNING — PORTWARP CONNECTED; ADD PUBLIC ADDRESS";
+                hostStatus.ForeColor = Color.Khaki;
+                MessageBox.Show("The local server and Portwarp connect command started. Copy the public hostname:port from your Portwarp dashboard into the Public address field, then click HOST GAME again to create the invite. Do not share your home IP.", "VZ — Public endpoint needed");
+                return;
+            }
+            inviteCode.Text = InviteCodec.Create(hostName, publicPort);
+            hostStatus.Text = "HOSTING — SHARE YOUR VZ INVITE";
+            hostStatus.ForeColor = Color.LightGreen;
+            Log("VZ invite created for Portwarp public endpoint " + hostName + ":" + publicPort);
+        }
+        catch (Exception ex)
+        {
+            hostStatus.Text = "HOST FAILED: " + ex.Message;
+            hostStatus.ForeColor = Color.OrangeRed;
+            Log(hostStatus.Text);
+            MessageBox.Show(ex.Message, "VZ Host");
+        }
+    }
+
+    void StopGameSession()
+    {
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(portwarpTunnel.Text) && File.Exists(PortwarpManager.ExecutablePath))
+                _ = PortwarpManager.RunAsync("stop " + QuoteArg(portwarpTunnel.Text.Trim()), TimeSpan.FromSeconds(15), line => Log("Portwarp: " + line));
+            if (gameServerProcess is { HasExited: false }) gameServerProcess.Kill(true);
+            gameServerProcess?.Dispose(); gameServerProcess = null;
+            inviteCode.Clear();
+            hostStatus.Text = "SESSION STOPPED"; hostStatus.ForeColor = Color.Gainsboro;
+            Log("VZ session stopped.");
+        }
+        catch (Exception ex) { Log("Stop session: " + ex.Message); MessageBox.Show(ex.Message, "VZ Stop"); }
+    }
+
+    void JoinGameSession()
+    {
+        try
+        {
+            var (hostName, port) = InviteCodec.Read(inviteInput.Text.Trim());
+            if (!string.IsNullOrWhiteSpace(clientExe.Text))
+            {
+                if (!File.Exists(clientExe.Text)) throw new FileNotFoundException("The selected game client executable was not found.");
+                var psi = new ProcessStartInfo { FileName = clientExe.Text, WorkingDirectory = Path.GetDirectoryName(clientExe.Text)!, UseShellExecute = false };
+                string args = clientArgs.Text.Replace("{host}", hostName, StringComparison.OrdinalIgnoreCase).Replace("{port}", port.ToString());
+                if (!string.IsNullOrWhiteSpace(args)) psi.Arguments = args;
+                Process.Start(psi);
+                joinStatus.Text = "Client launched for " + hostName + ":" + port;
+            }
+            else
+            {
+                Clipboard.SetText(hostName + ":" + port);
+                joinStatus.Text = "Endpoint copied: " + hostName + ":" + port + " — configure your game client to connect to it.";
+            }
+            Log("Invite decoded: " + hostName + ":" + port);
+        }
+        catch (Exception ex) { joinStatus.Text = "Join failed: " + ex.Message; Log(joinStatus.Text); MessageBox.Show(ex.Message, "VZ Join"); }
+    }
+
+    static bool TryParseEndpoint(string value, out string hostName, out int port)
+    {
+        hostName = ""; port = 0;
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        string text = value.Trim();
+        if (text.StartsWith("tcp://", StringComparison.OrdinalIgnoreCase)) text = text[6..];
+        if (text.StartsWith("udp://", StringComparison.OrdinalIgnoreCase)) text = text[6..];
+        int colon = text.LastIndexOf(':');
+        if (colon <= 0 || colon == text.Length - 1) return false;
+        hostName = text[..colon].Trim().TrimEnd('.');
+        return Uri.CheckHostName(hostName) != UriHostNameType.Unknown && int.TryParse(text[(colon + 1)..], out port) && port is > 0 and <= 65535;
     }
 
     async Task InstallPortwarp()
