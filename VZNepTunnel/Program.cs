@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using System.Security.Cryptography;
 using System.Windows.Forms;
 
 namespace VZNepTunnel;
@@ -23,11 +24,11 @@ internal sealed class MainForm : Form
     private readonly TextBox placeBox = new() { ReadOnly = true, Dock = DockStyle.Fill, PlaceholderText = "Choose a .rbxl or .rbxlx place file" };
     private readonly TextBox studioBox = new() { ReadOnly = true, Dock = DockStyle.Fill };
     private readonly TextBox relayCodeBox = new() { Multiline = true, Height = 72, Dock = DockStyle.Fill, ScrollBars = ScrollBars.Vertical, PlaceholderText = "Paste your Porthole relay connection code (porthole1_…)" };
-    private readonly TextBox localPortBox = new() { Text = "53640", Width = 100 };
+    private readonly TextBox localPortBox = new() { Text = "55555", Width = 100, Enabled = false };
     private readonly ComboBox protocolBox = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 130 };
-    private readonly CheckBox encryptBox = new() { Text = "Encrypt tunnel data", Checked = true, AutoSize = true };
+    private readonly CheckBox encryptBox = new() { Text = "Studio UDP mode (low latency)", Checked = true, AutoSize = true, Enabled = false };
     private readonly TextBox inviteBox = new() { Multiline = true, ReadOnly = true, Height = 72, Dock = DockStyle.Fill, ScrollBars = ScrollBars.Vertical };
-    private readonly TextBox joinCodeBox = new() { Multiline = true, Height = 72, Dock = DockStyle.Fill, ScrollBars = ScrollBars.Vertical, PlaceholderText = "Paste a VZ invite code (VZ2_…)" };
+    private readonly TextBox joinCodeBox = new() { Multiline = true, Height = 72, Dock = DockStyle.Fill, ScrollBars = ScrollBars.Vertical, PlaceholderText = "Paste a VZ Studio invite code (VZ3_…)" };
     private readonly Label hostStatus = new() { AutoSize = true, Text = "Not hosting", ForeColor = Color.Khaki };
     private readonly Label publicEndpoint = new() { AutoSize = true, Text = "No public endpoint yet", ForeColor = Color.LightSkyBlue, Font = new Font("Segoe UI", 12, FontStyle.Bold) };
     private readonly Label joinEndpoint = new() { AutoSize = true, Text = "No session loaded", ForeColor = Color.LightSkyBlue, Font = new Font("Segoe UI", 12, FontStyle.Bold) };
@@ -40,6 +41,10 @@ internal sealed class MainForm : Form
     private string? activeEndpoint;
     private string? activeProtocol;
     private int apiPort;
+    private HostSessionUdpRelay? hostRelay;
+    private JoinSessionUdpProxy? joinProxy;
+    private Process? studioServerProcess;
+    private Process? studioClientProcess;
     private bool closing;
 
     public MainForm()
@@ -52,7 +57,8 @@ internal sealed class MainForm : Form
         ForeColor = Color.White;
         Font = new Font("Segoe UI", 10);
         protocolBox.Items.AddRange(new object[] { "TCP + UDP", "TCP only", "UDP only" });
-        protocolBox.SelectedIndex = 0;
+        protocolBox.SelectedIndex = 2;
+        protocolBox.Enabled = false;
 
         var root = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(22), ColumnCount = 1, RowCount = 5 };
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -143,7 +149,7 @@ internal sealed class MainForm : Form
         layout.Controls.Add(localRow, 1, 1);
         layout.Controls.Add(new Label
         {
-            Text = "Set this to the local TCP/UDP port of the server you want to expose. Studio's Test tab must be running a server on that port.",
+            Text = "VZ starts Studio's local test server on UDP 55555 and protects it with a session token. Porthole forwards UDP 55556; friends use the invite to start matching Studio test clients.",
             AutoSize = true,
             MaximumSize = new Size(730, 0),
             ForeColor = Color.Khaki,
@@ -190,14 +196,15 @@ internal sealed class MainForm : Form
         layout.Controls.Add(FieldLabel("VZ INVITE CODE"), 0, 0);
         layout.Controls.Add(joinCodeBox, 1, 0);
         var buttons = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, Margin = new Padding(0, 10, 0, 10) };
-        buttons.Controls.Add(PrimaryButton("LOAD INVITE", LoadInvite));
+        buttons.Controls.Add(PrimaryButton("CONNECT & START CLIENT", ConnectSession));
+        buttons.Controls.Add(StyledButton("CHECK INVITE", LoadInvite));
         buttons.Controls.Add(StyledButton("COPY ADDRESS", CopyJoinAddress));
         layout.Controls.Add(buttons, 1, 1);
         layout.Controls.Add(FieldLabel("HOST ADDRESS"), 0, 2);
         layout.Controls.Add(joinEndpoint, 1, 2);
         layout.Controls.Add(new Label
         {
-            Text = "The invite contains the relay's public endpoint, not the relay's private connection code. Friends do not need Porthole installed to connect to a public TCP/UDP service. They do need a compatible game client that accepts this endpoint.",
+            Text = "Choose the same local .rbxl/.rbxlx file as the host. Friends do not need Porthole installed: VZ creates a local UDP proxy and starts Roblox Studio in StartClient mode using the host session IDs.",
             AutoSize = true,
             MaximumSize = new Size(730, 0),
             ForeColor = Color.Silver,
@@ -205,7 +212,7 @@ internal sealed class MainForm : Form
         }, 1, 3);
         layout.Controls.Add(new Label
         {
-            Text = "For Roblox Studio specifically, this is a network endpoint only. Studio's local multi-client test workflow does not expose a supported public join dialog, so VZ cannot guarantee remote Studio clients can join through this generic tunnel.",
+            Text = "Both players must use a compatible Studio build and the exact same place version. The host must keep VZ and the relay running. This is an unpublished Studio test session; VZ does not upload the place to Roblox.",
             AutoSize = true,
             MaximumSize = new Size(730, 0),
             ForeColor = Color.Khaki,
