@@ -50,7 +50,7 @@ internal sealed class UpnpPortMapping : IDisposable
                         ["NewInternalClient"] = localAddress.ToString(),
                         ["NewEnabled"] = "1",
                         ["NewPortMappingDescription"] = "VZ Studio Session",
-                        ["NewLeaseDuration"] = "0"
+                        ["NewLeaseDuration"] = "3600"
                     }, cancellationToken);
 
                     mapping._externalPort = externalPort;
@@ -135,6 +135,30 @@ internal sealed class UpnpPortMapping : IDisposable
         }
 
         throw new TimeoutException("No UPnP internet gateway was found. Your router may have UPnP disabled.");
+    }
+
+    /// <summary>
+    /// Refresh the one-hour lease while a VZ host session is alive. If VZ
+    /// crashes, the router will automatically discard the mapping within an
+    /// hour rather than leaving an indefinite open UDP port behind.
+    /// </summary>
+    public async Task RenewAsync(CancellationToken cancellationToken = default)
+    {
+        if (_externalPort == 0 || _controlUri == null || _serviceType == null)
+            throw new InvalidOperationException("No active VZ router mapping can be renewed.");
+
+        var localAddress = GetLocalIPv4Address();
+        await SoapAsync("AddPortMapping", new Dictionary<string, string>
+        {
+            ["NewRemoteHost"] = "",
+            ["NewExternalPort"] = _externalPort.ToString(),
+            ["NewProtocol"] = "UDP",
+            ["NewInternalPort"] = _externalPort == 0 ? "0" : "55556",
+            ["NewInternalClient"] = localAddress.ToString(),
+            ["NewEnabled"] = "1",
+            ["NewPortMappingDescription"] = "VZ Studio Session",
+            ["NewLeaseDuration"] = "3600"
+        }, cancellationToken);
     }
 
     private async Task<string> GetExternalAddressAsync(CancellationToken cancellationToken)
