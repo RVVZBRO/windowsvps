@@ -267,10 +267,11 @@ internal sealed class MainForm : Form
             string parentGuid = Guid.NewGuid().ToString().ToUpperInvariant();
             string playGuid = Guid.NewGuid().ToString().ToUpperInvariant();
 
-            Log("Preparing the selected place for Studio's local test server…");
-            PrepareServerPlaceFile();
+            Log("Opening the selected place in Studio…");
+            LaunchPlace();
+            await Task.Delay(2500);
 
-            Log("Starting the Studio test server with the selected place…");
+            Log("Starting the Studio local test server…");
             studioServerProcess = LaunchStudioServer(parentGuid, playGuid);
             await Task.Delay(4000);
             if (studioServerProcess.HasExited)
@@ -333,24 +334,6 @@ internal sealed class MainForm : Form
         }
     }
 
-    private string PrepareServerPlaceFile()
-    {
-        if (string.IsNullOrWhiteSpace(placePath) || !File.Exists(placePath))
-            throw new FileNotFoundException("The selected Roblox place file no longer exists.", placePath);
-
-        // Roblox Studio's StartServer test task reads this staging file.
-        // The editor's open-file command alone does not attach the map to the
-        // separate StartServer process.
-        string robloxData = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Roblox");
-        Directory.CreateDirectory(robloxData);
-        string serverPlace = Path.Combine(robloxData, "server.rbxl");
-        File.Copy(placePath, serverPlace, true);
-        Log("Staged server place: " + serverPlace);
-        return serverPlace;
-    }
-
     private Process LaunchStudioServer(string parentGuid, string playGuid)
     {
         var start = new ProcessStartInfo { FileName = studioPath!, UseShellExecute = false };
@@ -358,7 +341,6 @@ internal sealed class MainForm : Form
         {
             "-task", "StartServer",
             "-placeId", "0", "-universeId", "0", "-placeVersion", "0",
-            "-server", "127.0.0.1",
             "-port", HostSessionUdpRelay.StudioPort.ToString(),
             "-creatorId", "0", "-creatorType", "0", "-userid", "0",
             "-numTestServerPlayersUponStartup", "0",
