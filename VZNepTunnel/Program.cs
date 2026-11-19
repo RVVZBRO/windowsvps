@@ -24,7 +24,7 @@ internal sealed class MainForm : Form
     private readonly TextBox placeBox = new() { ReadOnly = true, Dock = DockStyle.Fill, PlaceholderText = "Choose a local .rbxl or .rbxlx file" };
     private readonly TextBox studioBox = new() { ReadOnly = true, Dock = DockStyle.Fill };
     private readonly TextBox hostInviteBox = new() { ReadOnly = true, Multiline = true, Dock = DockStyle.Fill, ScrollBars = ScrollBars.Vertical };
-    private readonly TextBox joinInviteBox = new() { Multiline = true, Dock = DockStyle.Fill, ScrollBars = ScrollBars.Vertical, PlaceholderText = "Paste a VZ4 invite from the host" };
+    private readonly TextBox joinInviteBox = new() { Multiline = true, Dock = DockStyle.Fill, ScrollBars = ScrollBars.Vertical, PlaceholderText = "Paste a VZ5 invite from the host" };
     private readonly Label hostStatus = new() { AutoSize = true, Text = "Not hosting", ForeColor = Color.Khaki };
     private readonly Label joinStatus = new() { AutoSize = true, Text = "Not connected", ForeColor = Color.Khaki };
     private readonly Label relayStatus = new() { AutoSize = true, Text = "Checking VZ relay configuration…", ForeColor = Color.LightSkyBlue };
@@ -79,7 +79,7 @@ internal sealed class MainForm : Form
         root.Controls.Add(placePanel);
 
         var relayRow = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, Margin = new Padding(0, 0, 0, 10) };
-        relayRow.Controls.Add(new Label { Text = "VZ RELAY", AutoSize = true, ForeColor = Color.Silver, Font = new Font("Segoe UI", 9, FontStyle.Bold), Padding = new Padding(0, 3, 8, 0) });
+        relayRow.Controls.Add(new Label { Text = "NETWORK", AutoSize = true, ForeColor = Color.Silver, Font = new Font("Segoe UI", 9, FontStyle.Bold), Padding = new Padding(0, 3, 8, 0) });
         relayRow.Controls.Add(relayStatus);
         root.Controls.Add(relayRow);
 
@@ -328,7 +328,7 @@ internal sealed class MainForm : Form
         try
         {
             var invite = VzInvite.Decode(joinInviteBox.Text.Trim());
-            SetJoinStatus("Connecting through the host's UDP tunnel…", Color.Khaki);
+            SetJoinStatus("Connecting to host UDP session…", Color.Khaki);
             joinProxy = new DirectJoinUdpProxy(invite.Host, invite.Port, invite.RoomId, invite.SessionKey);
             await joinProxy.StartAsync();
 
