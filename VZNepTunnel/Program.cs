@@ -5,6 +5,8 @@ using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Windows.Forms;
 
 namespace VZNepTunnel;
@@ -32,8 +34,9 @@ internal sealed class MainForm : Form
 
     private string? placePath;
     private string? studioPath;
-    private HostSessionUdpRelay? hostRelay;
-    private JoinSessionUdpProxy? joinProxy;
+    private HostSessionUdpGateway? hostGateway;
+    private OpenPortTunnelHost? hostTunnel;
+    private DirectJoinUdpProxy? joinProxy;
     private Process? studioServerProcess;
     private Process? studioClientProcess;
     private bool closing;
@@ -96,8 +99,8 @@ internal sealed class MainForm : Form
 
         studioPath = FindStudio();
         if (studioPath != null) studioBox.Text = studioPath;
-        Log("VZ is ready. Players only need this app and a VZ invite.");
-        _ = CheckRelayAsync();
+        Log("VZ is ready. Players need VZ and Roblox Studio only.");
+        SetRelayStatus("Bundled OpenPort.io UDP tunnel — no account setup", Color.LightSkyBlue);
     }
 
     private TabPage BuildHostTab()
@@ -122,12 +125,12 @@ internal sealed class MainForm : Form
 
         layout.Controls.Add(new Label
         {
-            Text = "Select your .rbxl/.rbxlx file above, then click HOST SESSION. VZ opens the place in Studio, starts the local test server and connects to the shared VZ relay automatically.",
+            Text = "Choose a local .rbxl/.rbxlx file and click HOST SESSION. VZ starts the selected place directly as a Studio test server, launches your own player client, and opens the bundled UDP tunnel automatically.",
             AutoSize = true, MaximumSize = new Size(710, 0), ForeColor = Color.Silver, Margin = new Padding(0, 8, 0, 8)
         }, 1, 3);
         layout.Controls.Add(new Label
         {
-            Text = "Share only the VZ4 invite. Do not share files from VZ's private data folder. Keep VZ and Roblox Studio running while friends are connected.",
+            Text = "Share the VZ5 invite with friends. They only need VZ and Roblox Studio — no tunnel app, account, VPS, router changes or copy of your map. Keep VZ and Studio open while hosting.",
             AutoSize = true, MaximumSize = new Size(710, 0), ForeColor = Color.Khaki, Margin = new Padding(0, 8, 0, 8)
         }, 1, 4);
         page.Controls.Add(layout);
@@ -150,7 +153,7 @@ internal sealed class MainForm : Form
         layout.Controls.Add(buttons, 1, 2);
         layout.Controls.Add(new Label
         {
-            Text = "Paste the host's VZ4 invite and click JOIN SESSION. You do not need the host's map file, a Porthole install, a VPS account or router configuration.",
+            Text = "Paste the host's VZ5 invite and click JOIN SESSION. VZ connects through the host's tunnel and launches the Studio test client. No OpenPort account or separate tunnel app is needed on your PC.",
             AutoSize = true, MaximumSize = new Size(710, 0), ForeColor = Color.Silver, Margin = new Padding(0, 8, 0, 8)
         }, 1, 3);
         page.Controls.Add(layout);
@@ -234,23 +237,10 @@ internal sealed class MainForm : Form
         return true;
     }
 
-    private async Task CheckRelayAsync()
-    {
-        try
-        {
-            var endpoint = await RelayEndpointResolver.ResolveAsync();
-            SetRelayStatus("Online address configured: " + endpoint, Color.LightGreen);
-        }
-        catch (Exception ex)
-        {
-            SetRelayStatus("Not configured yet", Color.Khaki);
-            Log("Relay setup is not complete: " + ex.Message);
-        }
-    }
-
     private async void StartHostSession()
     {
-        if (hostRelay != null || joinProxy != null)
+        if (hostGateway != null || hostTunnel != null || joinProxy != null ||
+            (studioServerProcess is { HasExited: false }) || (studioClientProcess is { HasExited: false }))
         {
             MessageBox.Show(this, "A VZ session is already active. Stop it first.", "VZ", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
@@ -260,51 +250,58 @@ internal sealed class MainForm : Form
         try
         {
             StopSession();
-            SetHostStatus("Starting Studio…", Color.Khaki);
+            SetHostStatus("Starting the selected Studio playtest…", Color.Khaki);
+            hostInviteBox.Clear();
+
             byte[] roomId = RandomNumberGenerator.GetBytes(16);
-            byte[] hostKey = RandomNumberGenerator.GetBytes(16);
             byte[] sessionKey = RandomNumberGenerator.GetBytes(32);
-            string parentGuid = Guid.NewGuid().ToString().ToUpperInvariant();
-            string playGuid = Guid.NewGuid().ToString().ToUpperInvariant();
+            string serverParentGuid = Guid.NewGuid().ToString().ToUpperInvariant();
+            string serverPlayGuid = Guid.NewGuid().ToString().ToUpperInvariant();
 
-            Log("Opening the selected place in Studio…");
-            LaunchPlace();
-            await Task.Delay(2500);
-
-            Log("Starting the Studio local test server…");
-            studioServerProcess = LaunchStudioServer(parentGuid, playGuid);
-            await Task.Delay(4000);
+            Log("Starting Roblox Studio directly with the selected local place file…");
+            studioServerProcess = LaunchStudioServer(serverParentGuid, serverPlayGuid);
+            await Task.Delay(5000);
             if (studioServerProcess.HasExited)
-                throw new InvalidOperationException("Roblox Studio's StartServer process exited. Check the Studio installation and selected place file.");
+                throw new InvalidOperationException("Roblox Studio's StartServer process exited. Check the selected file and Studio installation.");
 
-            Log("Starting your local Studio playtest client…");
-            string hostClientParentGuid = Guid.NewGuid().ToString().ToUpperInvariant();
-            string hostClientPlayGuid = Guid.NewGuid().ToString().ToUpperInvariant();
-            studioClientProcess = LaunchStudioClient(hostClientParentGuid, hostClientPlayGuid);
+            Log("Launching your own Studio playtest client…");
+            studioClientProcess = LaunchStudioClient(
+                Guid.NewGuid().ToString().ToUpperInvariant(),
+                Guid.NewGuid().ToString().ToUpperInvariant());
             await Task.Delay(800);
 
-            HostSessionUdpRelay? candidate = null;
+            SetHostStatus("LOCAL PLAYTEST RUNNING — OPENING TUNNEL…", Color.LightGreen);
             try
             {
-                var endpoint = await RelayEndpointResolver.ResolveAsync();
-                Log("Connecting to the VZ relay at " + endpoint + "…");
-                candidate = new HostSessionUdpRelay(endpoint, roomId, hostKey, sessionKey);
-                await candidate.StartAsync();
-                hostRelay = candidate;
-                hostInviteBox.Text = VzInvite.Encode(roomId, sessionKey);
-                SetHostStatus("PLAYTEST RUNNING — SHARE THE INVITE", Color.LightGreen);
-                Log("Your local Studio playtest is running and the VZ relay is connected. Send the VZ4 invite to friends.");
+                hostGateway = new HostSessionUdpGateway(roomId, sessionKey);
+                hostGateway.Start();
+
+                string openPortPath = Path.Combine(AppContext.BaseDirectory, "tools", "openport.exe");
+                if (!File.Exists(openPortPath))
+                    throw new FileNotFoundException("The bundled OpenPort tunnel engine is missing from the VZ package.", openPortPath);
+
+                Log("Opening the bundled OpenPort.io UDP tunnel (no account login)…");
+                hostTunnel = new OpenPortTunnelHost();
+                var endpoint = await hostTunnel.StartAsync(openPortPath, HostSessionUdpGateway.PublicPort, Log);
+                hostInviteBox.Text = VzInvite.Encode(endpoint.Host, endpoint.Port, roomId, sessionKey);
+
+                SetHostStatus("PLAYTEST + REMOTE TUNNEL LIVE — SHARE INVITE", Color.LightGreen);
+                SetRelayStatus("UDP tunnel connected: " + endpoint, Color.LightGreen);
+                Log("VZ5 invite ready. Share it with friends; keep VZ and Roblox Studio running.");
             }
-            catch (Exception relayError)
+            catch (Exception tunnelError)
             {
-                try { candidate?.Dispose(); } catch { }
-                hostRelay = null;
-                hostInviteBox.Clear();
-                SetHostStatus("LOCAL PLAYTEST ONLY — RELAY OFFLINE", Color.Khaki);
-                Log("Local Studio playtest is running, but remote hosting is unavailable: " + relayError.Message);
+                try { hostTunnel?.Dispose(); } catch { }
+                hostTunnel = null;
+                try { hostGateway?.Dispose(); } catch { }
+                hostGateway = null;
+
+                SetHostStatus("LOCAL PLAYTEST ONLY — TUNNEL UNAVAILABLE", Color.Khaki);
+                SetRelayStatus("Tunnel unavailable — local playtest still running", Color.Khaki);
+                Log("The local Studio playtest is running, but the public UDP tunnel did not come up: " + tunnelError.Message);
                 MessageBox.Show(this,
-                    "Your selected place is now running in a local Studio playtest.\n\nFriends cannot join remotely until the shared VZ relay has been deployed and configured.\n\n" + relayError.Message,
-                    "VZ — Local playtest started",
+                    "Your selected place is running in a local Studio playtest, and your own player client has opened.\n\nRemote friends cannot join until the OpenPort UDP tunnel connects. No Oracle VM or account setup is required by VZ.\n\n" + tunnelError.Message,
+                    "VZ — Local playtest is running",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
             }
@@ -313,14 +310,15 @@ internal sealed class MainForm : Form
         {
             Log("Host failed: " + ex.Message);
             StopSession();
-            SetHostStatus("Could not start session", Color.OrangeRed);
+            SetHostStatus("Could not start playtest", Color.OrangeRed);
             MessageBox.Show(this, ex.Message, "VZ host error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
     }
 
     private async void JoinSession()
     {
-        if (hostRelay != null || joinProxy != null)
+        if (hostGateway != null || hostTunnel != null || joinProxy != null ||
+            (studioServerProcess is { HasExited: false }) || (studioClientProcess is { HasExited: false }))
         {
             MessageBox.Show(this, "A VZ session is already active. Stop it first.", "VZ", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
@@ -330,16 +328,16 @@ internal sealed class MainForm : Form
         try
         {
             var invite = VzInvite.Decode(joinInviteBox.Text.Trim());
-            SetJoinStatus("Connecting to VZ relay…", Color.Khaki);
-            var endpoint = await RelayEndpointResolver.ResolveAsync();
-            joinProxy = new JoinSessionUdpProxy(endpoint, invite.RoomId, invite.SessionKey);
+            SetJoinStatus("Connecting through the host's UDP tunnel…", Color.Khaki);
+            joinProxy = new DirectJoinUdpProxy(invite.Host, invite.Port, invite.RoomId, invite.SessionKey);
             await joinProxy.StartAsync();
 
-            string parentGuid = Guid.NewGuid().ToString().ToUpperInvariant();
-            string playGuid = Guid.NewGuid().ToString().ToUpperInvariant();
-            studioClientProcess = LaunchStudioClient(parentGuid, playGuid);
-            SetJoinStatus("CONNECTED — STUDIO CLIENT STARTED", Color.LightGreen);
-            Log("Joined VZ relay room and launched Studio StartClient.");
+            Log("Host tunnel verified. Launching the Studio test client…");
+            studioClientProcess = LaunchStudioClient(
+                Guid.NewGuid().ToString().ToUpperInvariant(),
+                Guid.NewGuid().ToString().ToUpperInvariant());
+            SetJoinStatus("CONNECTED — STUDIO TEST CLIENT STARTED", Color.LightGreen);
+            Log("Joined the host's VZ session. The place remains on the host PC; it was not uploaded.");
         }
         catch (Exception ex)
         {
@@ -352,24 +350,18 @@ internal sealed class MainForm : Form
         }
     }
 
-    private void LaunchPlace()
+    private Process LaunchStudioServer(string parentGuid, string playGuid)
     {
         if (string.IsNullOrWhiteSpace(placePath) || !File.Exists(placePath))
             throw new FileNotFoundException("The selected Roblox place file was not found.", placePath);
 
         var start = new ProcessStartInfo { FileName = studioPath!, UseShellExecute = false };
-        start.ArgumentList.Add(placePath);
-        _ = Process.Start(start) ?? throw new InvalidOperationException("Roblox Studio could not open the selected place.");
-    }
-
-    private Process LaunchStudioServer(string parentGuid, string playGuid)
-    {
-        var start = new ProcessStartInfo { FileName = studioPath!, UseShellExecute = false };
         string[] args =
         {
             "-task", "StartServer",
+            "-localPlaceFile", placePath!,
             "-placeId", "0", "-universeId", "0", "-placeVersion", "0",
-            "-port", HostSessionUdpRelay.StudioPort.ToString(),
+            "-port", HostSessionUdpGateway.StudioPort.ToString(),
             "-creatorId", "0", "-creatorType", "0", "-userid", "0",
             "-numTestServerPlayersUponStartup", "0",
             "-parentSessionGuid", parentGuid,
@@ -386,7 +378,7 @@ internal sealed class MainForm : Form
         string[] args =
         {
             "-task", "StartClient", "-placeId", "0", "-universeId", "0", "-placeVersion", "0",
-            "-server", "127.0.0.1", "-port", JoinSessionUdpProxy.LocalPort.ToString(),
+            "-server", "127.0.0.1", "-port", DirectJoinUdpProxy.LocalPort.ToString(),
             "-parentSessionGuid", parentGuid, "-playTestSessionGuid", playGuid, "-instanceId", "StudioPlayer"
         };
         foreach (var arg in args) start.ArgumentList.Add(arg);
@@ -402,10 +394,13 @@ internal sealed class MainForm : Form
 
     private void StopSession()
     {
-        try { hostRelay?.Dispose(); } catch { }
-        hostRelay = null;
-        try { joinProxy?.Dispose(); } catch { }
+        try { hostGateway?.Dispose(); } catch (Exception ex) { Log("Host gateway cleanup warning: " + ex.Message); }
+        hostGateway = null;
+        try { hostTunnel?.Dispose(); } catch (Exception ex) { Log("OpenPort cleanup warning: " + ex.Message); }
+        hostTunnel = null;
+        try { joinProxy?.Dispose(); } catch (Exception ex) { Log("Join proxy cleanup warning: " + ex.Message); }
         joinProxy = null;
+
         StopChild(ref studioServerProcess);
         StopChild(ref studioClientProcess);
 
@@ -414,6 +409,7 @@ internal sealed class MainForm : Form
             hostInviteBox.Clear();
             SetHostStatus("Not hosting", Color.Khaki);
             SetJoinStatus("Not connected", Color.Khaki);
+            SetRelayStatus("Bundled OpenPort.io UDP tunnel — no account setup", Color.LightSkyBlue);
             Log("VZ session stopped.");
         }
     }
@@ -469,88 +465,99 @@ internal sealed class MainForm : Form
     }
 }
 
-internal static class RelayEndpointResolver
-{
-    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(8) };
-    private const string EndpointUrl = "https://raw.githubusercontent.com/RVVZBRO/windowsvps/vz-neptunnel-dotnet/relay/endpoint.txt";
-
-    public static async Task<IPEndPoint> ResolveAsync()
-    {
-        string configured = await Http.GetStringAsync(EndpointUrl);
-        configured = configured.Trim();
-        if (configured.Length == 0 || configured.StartsWith("#", StringComparison.Ordinal) || configured.Contains("NOT_CONFIGURED", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("The VZ relay server is not deployed yet. The VZ server owner must finish the one-time Oracle VM setup.");
-        int split = configured.LastIndexOf(':');
-        if (split <= 0 || !int.TryParse(configured[(split + 1)..], out int port) || port is < 1 or > 65535)
-            throw new FormatException("The VZ relay endpoint configuration is invalid.");
-        string host = configured[..split].Trim('[', ']');
-        var addresses = await Dns.GetHostAddressesAsync(host);
-        var ip = addresses.FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork)
-            ?? throw new SocketException((int)SocketError.HostNotFound);
-        return new IPEndPoint(ip, port);
-    }
-}
-
-internal sealed record VzInviteData(byte[] RoomId, byte[] SessionKey);
+internal sealed record OpenPortEndpoint(string Host, int Port);
+internal sealed record VzInviteData(string Host, int Port, byte[] RoomId, byte[] SessionKey);
 
 internal static class VzInvite
 {
-    public static string Encode(byte[] roomId, byte[] sessionKey)
+    public static string Encode(string host, int port, byte[] roomId, byte[] sessionKey)
     {
-        if (roomId.Length != 16 || sessionKey.Length != 32) throw new ArgumentException("Invalid VZ session key material.");
-        byte[] data = new byte[48];
-        Buffer.BlockCopy(roomId, 0, data, 0, 16);
-        Buffer.BlockCopy(sessionKey, 0, data, 16, 32);
-        return "VZ4_" + Convert.ToBase64String(data).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        if (string.IsNullOrWhiteSpace(host) || port is < 1 or > 65535 || roomId.Length != 16 || sessionKey.Length != 32)
+            throw new ArgumentException("Invalid VZ tunnel invite data.");
+
+        byte[] data = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            v = 5,
+            host,
+            port,
+            room = Convert.ToBase64String(roomId),
+            key = Convert.ToBase64String(sessionKey)
+        });
+        return "VZ5_" + Convert.ToBase64String(data).TrimEnd('=').Replace('+', '-').Replace('/', '_');
     }
 
     public static VzInviteData Decode(string invite)
     {
-        if (!invite.StartsWith("VZ4_", StringComparison.Ordinal)) throw new FormatException("This is not a VZ4 invite.");
+        if (!invite.StartsWith("VZ5_", StringComparison.Ordinal))
+            throw new FormatException("This is not a VZ5 invite. Ask the host to copy a current invite.");
+
         string encoded = invite[4..].Replace('-', '+').Replace('_', '/');
         encoded += new string('=', (4 - encoded.Length % 4) % 4);
-        byte[] data = Convert.FromBase64String(encoded);
-        if (data.Length != 48) throw new FormatException("The VZ4 invite is damaged or incomplete.");
-        return new VzInviteData(data[..16], data[16..48]);
+        using var doc = JsonDocument.Parse(Convert.FromBase64String(encoded));
+        var root = doc.RootElement;
+        if (!root.TryGetProperty("v", out var version) || version.GetInt32() != 5)
+            throw new FormatException("Unsupported VZ invite version.");
+
+        string host = root.GetProperty("host").GetString() ?? "";
+        int port = root.GetProperty("port").GetInt32();
+        byte[] roomId = Convert.FromBase64String(root.GetProperty("room").GetString() ?? "");
+        byte[] sessionKey = Convert.FromBase64String(root.GetProperty("key").GetString() ?? "");
+        if (string.IsNullOrWhiteSpace(host) || host.Any(char.IsWhiteSpace) ||
+            Uri.CheckHostName(host.Trim('[', ']')) == UriHostNameType.Unknown ||
+            port is < 1 or > 65535 || roomId.Length != 16 || sessionKey.Length != 32)
+            throw new FormatException("The VZ5 invite is invalid or incomplete.");
+
+        return new VzInviteData(host, port, roomId, sessionKey);
     }
 }
 
-internal static class RelayProtocol
+internal static class VzTunnelProtocol
 {
-    public const int HeaderLength = 5;
-    public const byte HostRegister = 1;
-    public const byte JoinRegister = 2;
-    public const byte JoinData = 3;
-    public const byte HostData = 4;
-    public const byte ToHost = 5;
-    public const byte ToJoin = 6;
-    public const byte Status = 7;
-    public static readonly byte[] Magic = Encoding.ASCII.GetBytes("VZR1");
+    public const byte JoinData = 1;
+    public const byte HostData = 2;
+    public const byte KeepAlive = 3;
+    public static readonly byte[] Magic = Encoding.ASCII.GetBytes("VZT5");
 
-    public static byte[] Header(byte type)
+    public static byte[] BuildEncrypted(byte type, byte[] roomId, byte[] clientId, byte[] key, byte[] payload)
     {
-        var packet = new byte[HeaderLength];
+        byte[] encrypted = Encrypt(key, payload);
+        byte[] packet = new byte[37 + encrypted.Length];
         Buffer.BlockCopy(Magic, 0, packet, 0, 4);
         packet[4] = type;
+        Buffer.BlockCopy(roomId, 0, packet, 5, 16);
+        Buffer.BlockCopy(clientId, 0, packet, 21, 16);
+        Buffer.BlockCopy(encrypted, 0, packet, 37, encrypted.Length);
         return packet;
     }
 
-    public static bool IsPacket(byte[] packet, byte type) =>
-        packet.Length >= HeaderLength && packet.AsSpan(0, 4).SequenceEqual(Magic) && packet[4] == type;
+    public static bool TryRead(byte[] packet, byte expectedType, byte[] roomId, out byte[] clientId, out byte[] encrypted)
+    {
+        clientId = Array.Empty<byte>();
+        encrypted = Array.Empty<byte>();
+        if (packet.Length < 65 || packet[4] != expectedType ||
+            !packet.AsSpan(0, 4).SequenceEqual(Magic) ||
+            !CryptographicOperations.FixedTimeEquals(packet.AsSpan(5, 16), roomId))
+            return false;
+
+        clientId = packet[21..37];
+        encrypted = packet[37..];
+        return true;
+    }
 
     public static byte[] Encrypt(byte[] key, byte[] payload)
     {
-        if (payload.Length > 64000) throw new InvalidOperationException("Studio UDP packet is too large for the VZ relay.");
+        if (payload.Length > 64000) throw new InvalidOperationException("Studio UDP packet is too large.");
         byte[] nonce = RandomNumberGenerator.GetBytes(12);
         byte[] cipher = new byte[payload.Length];
         byte[] tag = new byte[16];
         using var aes = new AesGcm(key, 16);
         aes.Encrypt(nonce, payload, cipher, tag);
-        byte[] output = new byte[nonce.Length + cipher.Length + tag.Length];
-        Buffer.BlockCopy(nonce, 0, output, 0, nonce.Length);
-        Buffer.BlockCopy(cipher, 0, output, 12, cipher.Length);
-        Buffer.BlockCopy(tag, 0, output, 12 + cipher.Length, tag.Length);
-        return output;
+
+        byte[] frame = new byte[12 + cipher.Length + 16];
+        Buffer.BlockCopy(nonce, 0, frame, 0, 12);
+        Buffer.BlockCopy(cipher, 0, frame, 12, cipher.Length);
+        Buffer.BlockCopy(tag, 0, frame, 12 + cipher.Length, 16);
+        return frame;
     }
 
     public static byte[]? Decrypt(byte[] key, byte[] frame)
@@ -566,118 +573,240 @@ internal static class RelayProtocol
         }
         catch (CryptographicException) { return null; }
     }
+}
 
-    public static byte[] BuildRegister(byte type, byte[] roomId, byte[] secret)
+internal sealed class OpenPortTunnelHost : IDisposable
+{
+    private static readonly Regex ForwardLine = new(
+        @"Now forwarding remote port\s+(?<endpoint>\S+)\s+to localhost:55556(?<mode>.*)$",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private readonly TaskCompletionSource<OpenPortEndpoint> _ready =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly StringBuilder _recent = new();
+    private readonly object _recentLock = new();
+    private Process? _process;
+    private Action<string>? _log;
+    private bool _disposed;
+
+    public async Task<OpenPortEndpoint> StartAsync(string executable, int localPort, Action<string> log)
     {
-        var packet = new byte[37];
-        Buffer.BlockCopy(Header(type), 0, packet, 0, 5);
-        Buffer.BlockCopy(roomId, 0, packet, 5, 16);
-        Buffer.BlockCopy(secret, 0, packet, 21, 16);
-        return packet;
+        if (!File.Exists(executable)) throw new FileNotFoundException("The bundled OpenPort tunnel engine was not found.", executable);
+        if (_process != null) throw new InvalidOperationException("The OpenPort tunnel is already running.");
+        _log = log;
+
+        string dataRoot = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "VZ", "OpenPort");
+        string openPortHome = Path.Combine(dataRoot, ".openport");
+        Directory.CreateDirectory(openPortHome);
+
+        string databasePath = Path.Combine(openPortHome, "openport.db");
+        var start = new ProcessStartInfo
+        {
+            FileName = executable,
+            WorkingDirectory = Path.GetDirectoryName(executable)!,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+            WindowStyle = ProcessWindowStyle.Hidden
+        };
+        // The upstream client stores its generated SSH identity under $HOME/.openport.
+        // Keep it inside VZ so this app never reads or changes the user's normal SSH keys.
+        start.Environment["HOME"] = dataRoot;
+        start.ArgumentList.Add("--ip-link-protection=False");
+        start.ArgumentList.Add("--database");
+        start.ArgumentList.Add(databasePath);
+        start.ArgumentList.Add("--keep-alive");
+        start.ArgumentList.Add("30");
+        start.ArgumentList.Add(localPort.ToString());
+
+        var process = new Process { StartInfo = start, EnableRaisingEvents = true };
+        process.OutputDataReceived += (_, e) => { if (e.Data != null) HandleLine(e.Data); };
+        process.ErrorDataReceived += (_, e) => { if (e.Data != null) HandleLine(e.Data); };
+        process.Exited += (_, _) =>
+        {
+            if (!_ready.Task.IsCompleted)
+                _ready.TrySetException(new InvalidOperationException("OpenPort exited before creating the UDP tunnel. " + RecentOutput()));
+        };
+
+        if (!process.Start()) throw new InvalidOperationException("Could not start the bundled OpenPort tunnel engine.");
+        _process = process;
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+
+        try
+        {
+            return await _ready.Task.WaitAsync(TimeSpan.FromSeconds(50));
+        }
+        catch (TimeoutException)
+        {
+            throw new TimeoutException("OpenPort did not report an active TCP + UDP tunnel within 50 seconds. " + RecentOutput());
+        }
     }
 
-    public static byte[] BuildJoinRegister(byte[] roomId, byte[] clientId, byte[] clientKey)
+    private void HandleLine(string raw)
     {
-        var packet = new byte[53];
-        Buffer.BlockCopy(Header(JoinRegister), 0, packet, 0, 5);
-        Buffer.BlockCopy(roomId, 0, packet, 5, 16);
-        Buffer.BlockCopy(clientId, 0, packet, 21, 16);
-        Buffer.BlockCopy(clientKey, 0, packet, 37, 16);
-        return packet;
+        string line = Regex.Replace(raw, @"\x1B\[[0-9;]*m", "").Trim();
+        if (line.Length == 0) return;
+        lock (_recentLock)
+        {
+            _recent.AppendLine(line);
+            if (_recent.Length > 6000) _recent.Remove(0, _recent.Length - 6000);
+        }
+        _log?.Invoke("OpenPort: " + line);
+
+        if (line.Contains("does not support UDP forwarding", StringComparison.OrdinalIgnoreCase) ||
+            line.Contains("UDP forwarding not available", StringComparison.OrdinalIgnoreCase))
+        {
+            _ready.TrySetException(new InvalidOperationException("The OpenPort server did not enable UDP forwarding. VZ requires UDP, not TCP-only tunneling."));
+            return;
+        }
+
+        var match = ForwardLine.Match(line);
+        if (!match.Success) return;
+        if (!match.Groups["mode"].Value.Contains("(tcp & udp)", StringComparison.OrdinalIgnoreCase))
+        {
+            _ready.TrySetException(new InvalidOperationException("OpenPort created a tunnel, but its status did not confirm UDP forwarding."));
+            return;
+        }
+
+        string endpoint = match.Groups["endpoint"].Value.Trim();
+        int separator = endpoint.LastIndexOf(':');
+        if (separator <= 0 || !int.TryParse(endpoint[(separator + 1)..], out int port) || port is < 1 or > 65535)
+        {
+            _ready.TrySetException(new FormatException("OpenPort reported an invalid public address: " + endpoint));
+            return;
+        }
+
+        string host = endpoint[..separator].Trim('[', ']');
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            _ready.TrySetException(new FormatException("OpenPort reported an empty public hostname."));
+            return;
+        }
+        _ready.TrySetResult(new OpenPortEndpoint(host, port));
+    }
+
+    private string RecentOutput()
+    {
+        lock (_recentLock) return _recent.ToString();
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        try
+        {
+            if (_process is { HasExited: false })
+            {
+                _process.Kill(true);
+                _process.WaitForExit(3000);
+            }
+        }
+        catch { }
+        _process?.Dispose();
+        _process = null;
     }
 }
 
-internal sealed class HostSessionUdpRelay : IDisposable
+internal sealed class HostSessionUdpGateway : IDisposable
 {
     public const int StudioPort = 55555;
-    private readonly IPEndPoint _relayEndpoint;
+    public const int PublicPort = 55556;
+    private const int MaxPlayers = 16;
+    private static readonly byte[] ReadyPayload = Encoding.ASCII.GetBytes("VZOK");
+
+    private sealed class PeerRoute
+    {
+        public required byte[] ClientId { get; init; }
+        public required UdpClient StudioSocket { get; init; }
+        public required IPEndPoint TunnelEndpoint { get; init; }
+        public DateTime LastSeenUtc;
+    }
+
     private readonly byte[] _roomId;
-    private readonly byte[] _hostKey;
     private readonly byte[] _sessionKey;
-    private readonly UdpClient _relay = new(AddressFamily.InterNetwork);
+    private readonly UdpClient _publicSocket;
     private readonly CancellationTokenSource _stop = new();
-    private readonly SemaphoreSlim _sendLock = new(1, 1);
-    private readonly ConcurrentDictionary<string, PeerRoute> _peers = new();
-    private readonly TaskCompletionSource<bool> _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly object _peersLock = new();
+    private readonly Dictionary<string, PeerRoute> _peers = new();
     private Task? _receiveTask;
-    private Task? _heartbeatTask;
+    private Task? _cleanupTask;
 
-    private sealed record PeerRoute(byte[] ClientId, UdpClient Socket);
-
-    public HostSessionUdpRelay(IPEndPoint relayEndpoint, byte[] roomId, byte[] hostKey, byte[] sessionKey)
+    public HostSessionUdpGateway(byte[] roomId, byte[] sessionKey)
     {
-        _relayEndpoint = relayEndpoint;
         _roomId = roomId;
-        _hostKey = hostKey;
         _sessionKey = sessionKey;
+        _publicSocket = new UdpClient(new IPEndPoint(IPAddress.Any, PublicPort));
     }
 
-    public async Task StartAsync()
+    public void Start()
     {
-        _relay.Connect(_relayEndpoint);
-        _receiveTask = Task.Run(ReceiveRelayAsync);
-        await SendHostRegisterAsync();
-        await _ready.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        _heartbeatTask = Task.Run(HeartbeatAsync);
+        _receiveTask = Task.Run(ReceiveLoopAsync);
+        _cleanupTask = Task.Run(CleanupLoopAsync);
     }
 
-    private async Task SendHostRegisterAsync()
-    {
-        await _sendLock.WaitAsync(_stop.Token);
-        try { await _relay.SendAsync(RelayProtocol.BuildRegister(RelayProtocol.HostRegister, _roomId, _hostKey), _stop.Token); }
-        finally { _sendLock.Release(); }
-    }
-
-    private async Task HeartbeatAsync()
+    private async Task ReceiveLoopAsync()
     {
         try
         {
             while (!_stop.IsCancellationRequested)
             {
-                await Task.Delay(TimeSpan.FromSeconds(8), _stop.Token);
-                await SendHostRegisterAsync();
-            }
-        }
-        catch (OperationCanceledException) { }
-        catch (ObjectDisposedException) { }
-        catch (SocketException) when (_stop.IsCancellationRequested) { }
-    }
+                var received = await _publicSocket.ReceiveAsync(_stop.Token);
+                byte[] clientId, encrypted;
+                byte type;
+                if (received.Buffer.Length < 5) continue;
+                type = received.Buffer[4];
+                if (type != VzTunnelProtocol.JoinData && type != VzTunnelProtocol.KeepAlive) continue;
+                if (!VzTunnelProtocol.TryRead(received.Buffer, type, _roomId, out clientId, out encrypted)) continue;
 
-    private async Task ReceiveRelayAsync()
-    {
-        try
-        {
-            while (!_stop.IsCancellationRequested)
-            {
-                var received = await _relay.ReceiveAsync(_stop.Token);
-                byte[] data = received.Buffer;
-                if (RelayProtocol.IsPacket(data, RelayProtocol.Status) && data.Length >= 6)
+                byte[]? plain = VzTunnelProtocol.Decrypt(_sessionKey, encrypted);
+                if (plain == null) continue;
+
+                string id = Convert.ToHexString(clientId);
+                PeerRoute? peer;
+                lock (_peersLock)
                 {
-                    if (data[5] == 1) _ready.TrySetResult(true);
-                    else if (data[5] == 2) _ready.TrySetException(new InvalidOperationException(Encoding.UTF8.GetString(data, 6, data.Length - 6)));
+                    if (!_peers.TryGetValue(id, out peer))
+                    {
+                        if (_peers.Count >= MaxPlayers) continue;
+                        peer = new PeerRoute
+                        {
+                            ClientId = clientId,
+                            StudioSocket = new UdpClient(AddressFamily.InterNetwork),
+                            TunnelEndpoint = received.RemoteEndPoint,
+                            LastSeenUtc = DateTime.UtcNow
+                        };
+                        _peers[id] = peer;
+                        _ = Task.Run(() => ReceiveStudioRepliesAsync(peer));
+                    }
+                    else if (!SameEndpoint(peer.TunnelEndpoint, received.RemoteEndPoint))
+                    {
+                        // A joining client ID is pinned to the OpenPort UDP channel
+                        // that first presented it; do not silently rebind it.
+                        continue;
+                    }
+                    peer.LastSeenUtc = DateTime.UtcNow;
+                }
+
+                if (type == VzTunnelProtocol.KeepAlive)
+                {
+                    byte[] ack = VzTunnelProtocol.BuildEncrypted(
+                        VzTunnelProtocol.HostData, _roomId, clientId, _sessionKey, ReadyPayload);
+                    await _publicSocket.SendAsync(ack, received.RemoteEndPoint, _stop.Token);
                     continue;
                 }
-                if (!RelayProtocol.IsPacket(data, RelayProtocol.ToHost) || data.Length < 49) continue;
 
-                byte[] clientId = data[5..21];
-                string id = Convert.ToHexString(clientId);
-                var route = _peers.GetOrAdd(id, peerKey =>
-                {
-                    var socket = new UdpClient(AddressFamily.InterNetwork);
-                    var peer = new PeerRoute(clientId, socket);
-                    _ = Task.Run(() => ReceiveStudioRepliesAsync(peer));
-                    return peer;
-                });
-
-                byte[]? plain = RelayProtocol.Decrypt(_sessionKey, data[21..]);
-                if (plain == null || plain.Length == 0) continue;
-                await route.Socket.SendAsync(plain, new IPEndPoint(IPAddress.Loopback, StudioPort), _stop.Token);
+                if (plain.Length > 0)
+                    await peer!.StudioSocket.SendAsync(plain, new IPEndPoint(IPAddress.Loopback, StudioPort), _stop.Token);
             }
         }
         catch (OperationCanceledException) { }
         catch (ObjectDisposedException) { }
         catch (SocketException) when (_stop.IsCancellationRequested) { }
-        catch (Exception ex) { _ready.TrySetException(ex); }
     }
 
     private async Task ReceiveStudioRepliesAsync(PeerRoute peer)
@@ -686,17 +815,10 @@ internal sealed class HostSessionUdpRelay : IDisposable
         {
             while (!_stop.IsCancellationRequested)
             {
-                var reply = await peer.Socket.ReceiveAsync(_stop.Token);
-                byte[] encrypted = RelayProtocol.Encrypt(_sessionKey, reply.Buffer);
-                byte[] packet = new byte[53 + encrypted.Length];
-                Buffer.BlockCopy(RelayProtocol.Header(RelayProtocol.HostData), 0, packet, 0, 5);
-                Buffer.BlockCopy(_roomId, 0, packet, 5, 16);
-                Buffer.BlockCopy(_hostKey, 0, packet, 21, 16);
-                Buffer.BlockCopy(peer.ClientId, 0, packet, 37, 16);
-                Buffer.BlockCopy(encrypted, 0, packet, 53, encrypted.Length);
-                await _sendLock.WaitAsync(_stop.Token);
-                try { await _relay.SendAsync(packet, _stop.Token); }
-                finally { _sendLock.Release(); }
+                var reply = await peer.StudioSocket.ReceiveAsync(_stop.Token);
+                byte[] packet = VzTunnelProtocol.BuildEncrypted(
+                    VzTunnelProtocol.HostData, _roomId, peer.ClientId, _sessionKey, reply.Buffer);
+                await _publicSocket.SendAsync(packet, peer.TunnelEndpoint, _stop.Token);
             }
         }
         catch (OperationCanceledException) { }
@@ -704,56 +826,92 @@ internal sealed class HostSessionUdpRelay : IDisposable
         catch (SocketException) when (_stop.IsCancellationRequested) { }
     }
 
+    private async Task CleanupLoopAsync()
+    {
+        try
+        {
+            while (!_stop.IsCancellationRequested)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(20), _stop.Token);
+                List<PeerRoute> expired = new();
+                lock (_peersLock)
+                {
+                    DateTime cutoff = DateTime.UtcNow - TimeSpan.FromSeconds(90);
+                    foreach (var entry in _peers.ToArray())
+                    {
+                        if (entry.Value.LastSeenUtc < cutoff)
+                        {
+                            _peers.Remove(entry.Key);
+                            expired.Add(entry.Value);
+                        }
+                    }
+                }
+                foreach (var peer in expired) peer.StudioSocket.Dispose();
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private static bool SameEndpoint(IPEndPoint a, IPEndPoint b) =>
+        a.Port == b.Port && a.Address.Equals(b.Address);
+
     public void Dispose()
     {
         _stop.Cancel();
-        _relay.Dispose();
-        foreach (var peer in _peers.Values) peer.Socket.Dispose();
-        _peers.Clear();
-        _sendLock.Dispose();
-        _stop.Dispose();
+        _publicSocket.Dispose();
+        lock (_peersLock)
+        {
+            foreach (var peer in _peers.Values) peer.StudioSocket.Dispose();
+            _peers.Clear();
+        }
     }
 }
 
-internal sealed class JoinSessionUdpProxy : IDisposable
+internal sealed class DirectJoinUdpProxy : IDisposable
 {
-    public const int LocalPort = HostSessionUdpRelay.StudioPort;
-    private readonly IPEndPoint _relayEndpoint;
+    public const int LocalPort = HostSessionUdpGateway.StudioPort;
+    private static readonly byte[] ReadyPayload = Encoding.ASCII.GetBytes("VZOK");
+
+    private readonly IPEndPoint _remoteEndpoint;
     private readonly byte[] _roomId;
     private readonly byte[] _sessionKey;
     private readonly byte[] _clientId = RandomNumberGenerator.GetBytes(16);
-    private readonly byte[] _clientKey = RandomNumberGenerator.GetBytes(16);
-    private readonly UdpClient _relay = new(AddressFamily.InterNetwork);
+    private readonly UdpClient _remote = new(AddressFamily.InterNetwork);
     private readonly UdpClient _local = new(new IPEndPoint(IPAddress.Loopback, LocalPort));
     private readonly CancellationTokenSource _stop = new();
-    private readonly SemaphoreSlim _sendLock = new(1, 1);
     private readonly TaskCompletionSource<bool> _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly SemaphoreSlim _sendLock = new(1, 1);
     private IPEndPoint? _studioClient;
-    private Task? _relayReceiveTask;
-    private Task? _localReceiveTask;
+    private Task? _remoteTask;
+    private Task? _localTask;
     private Task? _heartbeatTask;
 
-    public JoinSessionUdpProxy(IPEndPoint relayEndpoint, byte[] roomId, byte[] sessionKey)
+    public DirectJoinUdpProxy(string host, int port, byte[] roomId, byte[] sessionKey)
     {
-        _relayEndpoint = relayEndpoint;
         _roomId = roomId;
         _sessionKey = sessionKey;
+        var addresses = Dns.GetHostAddresses(host);
+        var address = addresses.FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork)
+            ?? throw new SocketException((int)SocketError.HostNotFound);
+        _remoteEndpoint = new IPEndPoint(address, port);
     }
 
     public async Task StartAsync()
     {
-        _relay.Connect(_relayEndpoint);
-        _relayReceiveTask = Task.Run(ReceiveRelayAsync);
-        await SendRegisterAsync();
-        await _ready.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        _localReceiveTask = Task.Run(ReceiveStudioClientAsync);
+        _remote.Connect(_remoteEndpoint);
+        _remoteTask = Task.Run(ReceiveRemoteAsync);
+        _localTask = Task.Run(ReceiveStudioClientAsync);
+        await SendKeepAliveAsync();
+        await _ready.Task.WaitAsync(TimeSpan.FromSeconds(12));
         _heartbeatTask = Task.Run(HeartbeatAsync);
     }
 
-    private async Task SendRegisterAsync()
+    private async Task SendKeepAliveAsync()
     {
+        byte[] packet = VzTunnelProtocol.BuildEncrypted(
+            VzTunnelProtocol.KeepAlive, _roomId, _clientId, _sessionKey, Array.Empty<byte>());
         await _sendLock.WaitAsync(_stop.Token);
-        try { await _relay.SendAsync(RelayProtocol.BuildJoinRegister(_roomId, _clientId, _clientKey), _stop.Token); }
+        try { await _remote.SendAsync(packet, _stop.Token); }
         finally { _sendLock.Release(); }
     }
 
@@ -763,8 +921,8 @@ internal sealed class JoinSessionUdpProxy : IDisposable
         {
             while (!_stop.IsCancellationRequested)
             {
-                await Task.Delay(TimeSpan.FromSeconds(8), _stop.Token);
-                await SendRegisterAsync();
+                await Task.Delay(TimeSpan.FromSeconds(10), _stop.Token);
+                await SendKeepAliveAsync();
             }
         }
         catch (OperationCanceledException) { }
@@ -778,17 +936,12 @@ internal sealed class JoinSessionUdpProxy : IDisposable
         {
             while (!_stop.IsCancellationRequested)
             {
-                var packet = await _local.ReceiveAsync(_stop.Token);
-                _studioClient = packet.RemoteEndPoint;
-                byte[] encrypted = RelayProtocol.Encrypt(_sessionKey, packet.Buffer);
-                byte[] data = new byte[53 + encrypted.Length];
-                Buffer.BlockCopy(RelayProtocol.Header(RelayProtocol.JoinData), 0, data, 0, 5);
-                Buffer.BlockCopy(_roomId, 0, data, 5, 16);
-                Buffer.BlockCopy(_clientId, 0, data, 21, 16);
-                Buffer.BlockCopy(_clientKey, 0, data, 37, 16);
-                Buffer.BlockCopy(encrypted, 0, data, 53, encrypted.Length);
+                var received = await _local.ReceiveAsync(_stop.Token);
+                _studioClient = received.RemoteEndPoint;
+                byte[] packet = VzTunnelProtocol.BuildEncrypted(
+                    VzTunnelProtocol.JoinData, _roomId, _clientId, _sessionKey, received.Buffer);
                 await _sendLock.WaitAsync(_stop.Token);
-                try { await _relay.SendAsync(data, _stop.Token); }
+                try { await _remote.SendAsync(packet, _stop.Token); }
                 finally { _sendLock.Release(); }
             }
         }
@@ -797,26 +950,29 @@ internal sealed class JoinSessionUdpProxy : IDisposable
         catch (SocketException) when (_stop.IsCancellationRequested) { }
     }
 
-    private async Task ReceiveRelayAsync()
+    private async Task ReceiveRemoteAsync()
     {
         try
         {
             while (!_stop.IsCancellationRequested)
             {
-                var received = await _relay.ReceiveAsync(_stop.Token);
+                var received = await _remote.ReceiveAsync(_stop.Token);
                 byte[] data = received.Buffer;
-                if (RelayProtocol.IsPacket(data, RelayProtocol.Status) && data.Length >= 6)
+                if (!VzTunnelProtocol.TryRead(data, VzTunnelProtocol.HostData, _roomId, out var clientId, out var encrypted) ||
+                    !CryptographicOperations.FixedTimeEquals(clientId, _clientId))
+                    continue;
+
+                byte[]? plain = VzTunnelProtocol.Decrypt(_sessionKey, encrypted);
+                if (plain == null) continue;
+                if (plain.AsSpan().SequenceEqual(ReadyPayload))
                 {
-                    if (data[5] == 1) _ready.TrySetResult(true);
-                    else if (data[5] == 2) _ready.TrySetException(new InvalidOperationException(Encoding.UTF8.GetString(data, 6, data.Length - 6)));
+                    _ready.TrySetResult(true);
                     continue;
                 }
-                if (!RelayProtocol.IsPacket(data, RelayProtocol.ToJoin) || data.Length <= 5) continue;
+
                 var target = _studioClient;
-                if (target == null) continue;
-                byte[]? plain = RelayProtocol.Decrypt(_sessionKey, data[5..]);
-                if (plain == null || plain.Length == 0) continue;
-                await _local.SendAsync(plain, target, _stop.Token);
+                if (target != null && plain.Length > 0)
+                    await _local.SendAsync(plain, target, _stop.Token);
             }
         }
         catch (OperationCanceledException) { }
@@ -828,9 +984,8 @@ internal sealed class JoinSessionUdpProxy : IDisposable
     public void Dispose()
     {
         _stop.Cancel();
-        _relay.Dispose();
+        _remote.Dispose();
         _local.Dispose();
         _sendLock.Dispose();
-        _stop.Dispose();
     }
 }
