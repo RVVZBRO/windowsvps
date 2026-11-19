@@ -199,6 +199,7 @@ internal sealed class MainForm : Form
         buttons.Controls.Add(PrimaryButton("CONNECT & START CLIENT", ConnectSession));
         buttons.Controls.Add(StyledButton("CHECK INVITE", LoadInvite));
         buttons.Controls.Add(StyledButton("COPY ADDRESS", CopyJoinAddress));
+        buttons.Controls.Add(StyledButton("STOP SESSION", StopTunnel));
         layout.Controls.Add(buttons, 1, 1);
         layout.Controls.Add(FieldLabel("HOST ADDRESS"), 0, 2);
         layout.Controls.Add(joinEndpoint, 1, 2);
@@ -727,12 +728,7 @@ internal sealed class MainForm : Form
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
         closing = true;
-        try
-        {
-            if (tunnelProcess is { HasExited: false }) tunnelProcess.Kill(true);
-            tunnelProcess?.Dispose();
-        }
-        catch { }
+        try { StopTunnel(); } catch { }
         http.Dispose();
         base.OnFormClosing(e);
     }
