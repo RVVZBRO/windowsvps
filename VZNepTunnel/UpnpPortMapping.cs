@@ -191,7 +191,7 @@ internal sealed class UpnpPortMapping : IDisposable
         return responseBody;
     }
 
-    private static IPAddress GetLocalIPv4Address()
+    public static IPAddress GetLocalIPv4Address()
     {
         using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
         socket.Connect(new IPEndPoint(IPAddress.Parse("8.8.8.8"), 53));
