@@ -4,30 +4,46 @@ HOST A PLACE
 1. Open VZ.exe.
 2. Select your local .rbxl or .rbxlx file.
 3. Click HOST SESSION.
-4. Copy the VZ4_ invite and send it to friends.
-5. Keep VZ and Roblox Studio running.
+4. Allow the one-time Windows Firewall rule if Windows asks.
+5. VZ starts the selected place as a Studio test server and opens your own
+   Studio playtest client.
+6. On a compatible router, VZ requests a temporary UDP port mapping and
+   creates a VZ5_ invite. Copy it and send it to friends.
+7. Keep VZ and Roblox Studio running.
 
 JOIN A PLACE
 1. Open VZ.exe.
 2. Open JOIN SESSION.
-3. Paste the host's VZ4_ invite.
+3. Paste the host's VZ5_ invite.
 4. Click JOIN SESSION.
 
 WHAT PLAYERS NEED
 - VZ Windows application.
 - Compatible Roblox Studio installed locally.
-- A host invite from the person running the session.
+- A VZ5_ invite from the host.
 
-Players do not need a VPS account, Porthole, a map copy, UPnP, or router
-port-forwarding. The project owner operates one shared VZ UDP relay.
+WHAT THE HOST NETWORK NEEDS
+- Router must support UPnP IGD and have it enabled.
+- ISP must provide a public IPv4 address (not CGNAT).
+- Windows Firewall must allow inbound UDP 55556. VZ asks Windows to add
+  this specific rule with a one-time UAC prompt.
+- VZ removes the router port mapping when the session is stopped.
 
-OWNER — ONE-TIME RELAY SETUP
-Read deploy/oracle/README.txt. The shared relay runs on one Oracle Cloud
-Always Free VM. The first deployment requires the owner to create the Oracle
-account/VM and set the VM's public IPv4 in relay/endpoint.txt.
+IMPORTANT LIMIT
+This build uses direct UDP port mapping. The invite contains the host's
+public IPv4 address and port, so the host's public IP is visible to the
+people who receive the invite. If the router has UPnP disabled or the ISP
+uses CGNAT, remote hosting will not work; the local Studio playtest will
+still start. This build does not include a third-party cloud relay.
+
+A tunnel cannot create a free public VM by itself. A CGNAT-proof relay
+needs an operated public server or a third-party tunnel provider. The
+currently verified no-signup tunnel candidates did not have a client
+binary/source/checksum that could be safely bundled into this package.
 
 COMPATIBILITY
 VZ launches Roblox Studio's unpublished StartServer/StartClient test flow.
-This is experimental and is not official Roblox Player matchmaking. Both
-computers need a compatible Studio version. VZ does not upload or publish
-the selected local place.
+This is experimental and is not official Roblox Player matchmaking.
+Studio's internal startup flags/networking can change between versions.
+Both computers need compatible Studio versions. VZ does not upload or
+publish the selected local place.
