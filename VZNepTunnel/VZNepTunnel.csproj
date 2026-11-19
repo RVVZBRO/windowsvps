@@ -5,11 +5,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <AssemblyName>VZ NepTunnel</AssemblyName>
+    <AssemblyName>VZ</AssemblyName>
     <RootNamespace>VZNepTunnel</RootNamespace>
   </PropertyGroup>
-  <ItemGroup>
-    <EmbeddedResource Include="../RobloxStudio/VZNepTunnelImporter.lua" LogicalName="VZNepTunnel.VZNepTunnelImporter.lua" />
-  </ItemGroup>
-  <ItemGroup><PackageReference Include="DiscordRichPresence" Version="1.6.1.70" /></ItemGroup>
 </Project>
