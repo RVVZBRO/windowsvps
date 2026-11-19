@@ -1,45 +1,40 @@
--- VZ NepTunnel Studio testing plugin
--- This drives Roblox Studio's built-in local multiplayer test harness.
--- It does not create a public Roblox server or an Internet join endpoint.
+-- VZ NepTunnel: official Roblox Studio local multiplayer test plugin.
+-- StudioTestService is a Studio-only testing API; it does not expose an Internet server.
 local StudioTestService = game:GetService("StudioTestService")
 local toolbar = plugin:CreateToolbar("VZ NepTunnel")
-local running = false
+local active = false
 
-local function addTestButton(clientCount)
+local function createTestButton(clientCount)
     local button = toolbar:CreateButton(
         "VZTest" .. tostring(clientCount),
-        "Start a local Studio server with " .. tostring(clientCount) .. " simulated client(s)",
+        "Run a local Studio server with " .. tostring(clientCount) .. " simulated client(s)",
         ""
     )
     button.ClickableWhenViewportHidden = true
     button.Click:Connect(function()
-        if running then
-            warn("[VZ NepTunnel] A Studio multiplayer test is already running. End that test before starting another.")
+        if active then
+            warn("[VZ NepTunnel] A multiplayer test is already running. End it in Studio before starting another.")
             return
         end
-        running = true
+        active = true
         button.Enabled = false
         task.spawn(function()
             local ok, result = pcall(function()
-                return StudioTestService:ExecuteMultiplayerTestAsync(clientCount, {
-                    source = "VZ NepTunnel",
-                    clients = clientCount,
-                })
+                return StudioTestService:ExecuteMultiplayerTestAsync(clientCount, "VZ NepTunnel")
             end)
-            if not ok then
-                warn("[VZ NepTunnel] Studio test failed: " .. tostring(result))
+            if ok then
+                print("[VZ NepTunnel] Local multiplayer test finished: " .. tostring(result))
             else
-                print("[VZ NepTunnel] Studio test ended: " .. tostring(result))
+                warn("[VZ NepTunnel] Could not start/complete Studio test: " .. tostring(result))
             end
-            running = false
+            active = false
             button.Enabled = true
         end)
     end)
 end
 
-addTestButton(1)
-addTestButton(2)
-addTestButton(4)
-addTestButton(8)
-
-print("[VZ NepTunnel] Ready. Use Plugins > VZ NepTunnel and choose 1, 2, 4, or 8 local simulated clients.")
+createTestButton(1)
+createTestButton(2)
+createTestButton(4)
+createTestButton(8)
+print("[VZ NepTunnel] Ready. Open Plugins > VZ NepTunnel and choose VZTest1, VZTest2, VZTest4, or VZTest8.")
