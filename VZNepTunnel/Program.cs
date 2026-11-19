@@ -343,7 +343,7 @@ internal sealed class MainForm : Form
 
         var start = new ProcessStartInfo { FileName = studioPath!, UseShellExecute = false };
         start.ArgumentList.Add(placePath);
-        Process.Start(start) ?? throw new InvalidOperationException("Roblox Studio could not open the selected place.");
+        _ = Process.Start(start) ?? throw new InvalidOperationException("Roblox Studio could not open the selected place.");
     }
 
     private Process LaunchStudioServer(string parentGuid, string playGuid)
