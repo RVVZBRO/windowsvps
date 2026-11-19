@@ -15,6 +15,11 @@ MIN_PORT="${PORTHOLE_MIN_PORT:-10000}"
 MAX_PORT="${PORTHOLE_MAX_PORT:-20000}"
 INSTALL_DIR="/opt/vz-porthole"
 
+if [[ "$(uname -m)" != "x86_64" ]]; then
+  echo "This bundled Porthole GHCR image is x86-64. Use Oracle VM.Standard.E2.1.Micro (AMD), not Ampere A1 ARM." >&2
+  exit 1
+fi
+
 if ! command -v apt-get >/dev/null 2>&1; then
   echo "This setup script supports Ubuntu/Debian with apt." >&2
   exit 1
