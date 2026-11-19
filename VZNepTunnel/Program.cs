@@ -60,7 +60,7 @@ internal sealed class MainForm : Form
         tabs.TabPages.Add(CloudPage());
         tabs.TabPages.Add(SettingsPage());
         Controls.Add(tabs);
-        Log("VZ NepTunnel started. LAN UDP testing is available; public Internet tunnelling requires a configured relay VPS.");
+        Log("VZ NepTunnel started. Public VPS relay is the intended connection path; LAN-IP joining is disabled.");
         LoadSettings();
         discordEnabled.CheckedChanged += (_, _) => ApplyDiscord();
         FormClosing += (_, _) => { StopHost(); StopDiscord(); SaveSettings(); };
@@ -99,18 +99,15 @@ internal sealed class MainForm : Form
     {
         var p = Page("Join");
         var flow = new FlowLayoutPanel { Dock = DockStyle.Top, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true };
-        flow.Controls.Add(Heading("Join a session"));
-        flow.Controls.Add(new Label { Text = "Enter the host's LAN IP address and UDP port:", AutoSize = true });
-        flow.Controls.Add(address);
-        flow.Controls.Add(joinPort);
-        flow.Controls.Add(Btn("Send LAN connection test", async () => await SendTest()));
-        flow.Controls.Add(new Label { Text = "Public relay connection test:", AutoSize = true, Margin = new Padding(0,18,0,4) });
+        flow.Controls.Add(Heading("Join over the Internet"));
+        flow.Controls.Add(new Label { Text = "Enter the public VZ relay address and the room code shared by the host. You do not need the host's home IP or to be on the same Wi-Fi.", AutoSize = true, MaximumSize = new Size(760,0) });
+        flow.Controls.Add(new Label { Text = "Public relay IPv4:", AutoSize = true });
         flow.Controls.Add(relayIp);
+        flow.Controls.Add(new Label { Text = "Host's room code:", AutoSize = true });
         flow.Controls.Add(roomCode);
-        relayRole.Items.AddRange(new object[] { "host", "join" }); relayRole.SelectedIndex = 0;
-        flow.Controls.Add(relayRole);
-        flow.Controls.Add(Btn("Test relay registration", async () => await TestRelay()));
-        flow.Controls.Add(new Label { Text = "Both PCs must be on the same reachable network for this LAN test. Internet joining needs a relay VPS.", AutoSize = true, MaximumSize = new Size(760,0), ForeColor = Color.Khaki, Margin = new Padding(0,16,0,0) });
+        relayRole.Items.Clear(); relayRole.Items.AddRange(new object[] { "host", "join" }); relayRole.SelectedItem = "join";
+        flow.Controls.Add(Btn("Connect to public relay", async () => { relayRole.SelectedItem = "join"; await TestRelay(); }));
+        flow.Controls.Add(new Label { Text = "This currently tests public relay registration only. Full Roblox Studio gameplay forwarding is not yet verified, so VZ will not claim that you have joined a playable session.", AutoSize = true, MaximumSize = new Size(760,0), ForeColor = Color.Khaki, Margin = new Padding(0,16,0,0) });
         p.Controls.Add(flow); return p;
     }
 
