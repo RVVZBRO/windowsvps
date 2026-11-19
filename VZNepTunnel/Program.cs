@@ -267,23 +267,28 @@ internal sealed class MainForm : Form
             string parentGuid = Guid.NewGuid().ToString().ToUpperInvariant();
             string playGuid = Guid.NewGuid().ToString().ToUpperInvariant();
 
-            Log("Opening local place in Roblox Studio…");
-            LaunchPlace();
-            await Task.Delay(2500);
+            Log("Preparing the selected place for Studio's local test server…");
+            PrepareServerPlaceFile();
 
-            Log("Starting Studio local test server…");
+            Log("Starting the Studio test server with the selected place…");
             studioServerProcess = LaunchStudioServer(parentGuid, playGuid);
-            await Task.Delay(3500);
+            await Task.Delay(4000);
             if (studioServerProcess.HasExited)
-                throw new InvalidOperationException("Roblox Studio's StartServer process exited. Check the Studio install and place file.");
+                throw new InvalidOperationException("Roblox Studio's StartServer process exited. Check the Studio installation and selected place file.");
+
+            Log("Starting your local Studio playtest client…");
+            string hostClientParentGuid = Guid.NewGuid().ToString().ToUpperInvariant();
+            string hostClientPlayGuid = Guid.NewGuid().ToString().ToUpperInvariant();
+            studioClientProcess = LaunchStudioClient(hostClientParentGuid, hostClientPlayGuid);
+            await Task.Delay(800);
 
             var endpoint = await RelayEndpointResolver.ResolveAsync();
             Log("Connecting to the VZ relay at " + endpoint + "…");
             hostRelay = new HostSessionUdpRelay(endpoint, roomId, hostKey, sessionKey);
             await hostRelay.StartAsync();
             hostInviteBox.Text = VzInvite.Encode(roomId, sessionKey);
-            SetHostStatus("HOSTING — SHARE THE INVITE", Color.LightGreen);
-            Log("Host session registered. VZ invite generated; keep this PC online.");
+            SetHostStatus("PLAYTEST RUNNING — SHARE THE INVITE", Color.LightGreen);
+            Log("Your Studio client is running against the selected local place. Host relay registered; send the VZ4 invite to friends.");
         }
         catch (Exception ex)
         {
@@ -328,11 +333,22 @@ internal sealed class MainForm : Form
         }
     }
 
-    private void LaunchPlace()
+    private string PrepareServerPlaceFile()
     {
-        var start = new ProcessStartInfo { FileName = studioPath!, UseShellExecute = false };
-        start.ArgumentList.Add(placePath!);
-        Process.Start(start);
+        if (string.IsNullOrWhiteSpace(placePath) || !File.Exists(placePath))
+            throw new FileNotFoundException("The selected Roblox place file no longer exists.", placePath);
+
+        // Roblox Studio's StartServer test task reads this staging file.
+        // The editor's open-file command alone does not attach the map to the
+        // separate StartServer process.
+        string robloxData = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Roblox");
+        Directory.CreateDirectory(robloxData);
+        string serverPlace = Path.Combine(robloxData, "server.rbxl");
+        File.Copy(placePath, serverPlace, true);
+        Log("Staged server place: " + serverPlace);
+        return serverPlace;
     }
 
     private Process LaunchStudioServer(string parentGuid, string playGuid)
@@ -340,10 +356,15 @@ internal sealed class MainForm : Form
         var start = new ProcessStartInfo { FileName = studioPath!, UseShellExecute = false };
         string[] args =
         {
-            "-task", "StartServer", "-placeId", "0", "-universeId", "0", "-placeVersion", "0",
-            "-port", HostSessionUdpRelay.StudioPort.ToString(), "-creatorId", "0", "-creatorType", "0", "-userid", "0",
-            "-numTestServerPlayersUponStartup", "0", "-parentSessionGuid", parentGuid,
-            "-playTestSessionGuid", playGuid, "-instanceId", "StudioServer"
+            "-task", "StartServer",
+            "-placeId", "0", "-universeId", "0", "-placeVersion", "0",
+            "-server", "127.0.0.1",
+            "-port", HostSessionUdpRelay.StudioPort.ToString(),
+            "-creatorId", "0", "-creatorType", "0", "-userid", "0",
+            "-numTestServerPlayersUponStartup", "0",
+            "-parentSessionGuid", parentGuid,
+            "-playTestSessionGuid", playGuid,
+            "-instanceId", "StudioServer"
         };
         foreach (var arg in args) start.ArgumentList.Add(arg);
         return Process.Start(start) ?? throw new InvalidOperationException("Roblox Studio StartServer process could not be started.");
