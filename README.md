@@ -1,54 +1,73 @@
-# VZ NepTunnel
+# VZ — Roblox Studio Launcher + Self-Hosted Tunnel
 
-VZ NepTunnel is a Windows x64 desktop session launcher with Portwarp tunnel controls.
+VZ is a Windows x64 desktop app that opens local Roblox .rbxl/.rbxlx files in
+Studio and provides a UI for a self-hosted TCP/UDP relay powered by the
+[Porthole project](https://github.com/sudo-ds/porthole) (MIT).
 
-## What this branch currently provides
+## Included in the Windows ZIP
 
-- WinForms desktop UI for hosting and joining.
-- Portwarp CLI setup (download from Portwarp's official downloads page and select the extracted `pwrp.exe`).
-- Browser/device sign-in using `pwrp login`.
-- List, connect, and stop configured Portwarp tunnels.
-- Launch a user-selected dedicated game-server executable.
-- Pass optional server arguments with `{map}` and `{port}` substitutions.
-- Generate a VZ1 invite containing the public Portwarp hostname and port.
-- Decode invites and launch a user-selected client with `{host}` and `{port}` substitutions.
-- Activity log, appearance settings, and optional Discord Rich Presence.
+- VZ.exe — self-contained Windows desktop UI.
+- tools/porthole.exe — Porthole Windows tunnel engine.
+- deploy/oracle/setup-vz-relay.sh — Ubuntu/Oracle Always Free relay bootstrap.
+- deploy/oracle/README.txt — setup and cloud firewall instructions.
 
-## First-time Portwarp setup
+## One-time relay setup
 
-1. Install/update Portwarp CLI from the Portwarp downloads page using the Portwarp tab in VZ.
-2. Click **Sign in to Portwarp** and approve the device in your browser.
-3. Open the Portwarp dashboard and create/enable a tunnel using the game server's local port and the correct protocol (TCP or UDP).
-4. Copy the tunnel name into VZ's Host tab.
-5. Keep the local server port and Portwarp tunnel's configured local port identical.
+The free/open-source tunnel software is not itself a free hosted relay. To
+get a public address and port without paying a VPS bill, run your own relay
+on Oracle Cloud Always Free, subject to the provider's quotas and capacity:
 
-## Hosting
+1. Sign up at https://www.oracle.com/cloud/free/ and create an Ubuntu VM
+   in your home region using an Always Free eligible shape.
+2. Assign it a public IPv4 address.
+3. Run deploy/oracle/setup-vz-relay.sh on the VM as root.
+4. In Oracle's VCN Security List or Network Security Group, separately open
+   TCP 7835, TCP 10000-20000 and UDP 10000-20000. UFW alone does not open
+   Oracle's cloud firewall.
+5. Run: cd /opt/vz-porthole && sudo docker compose run --rm porthole invite
+6. Paste the generated porthole1_... code into VZ's Host Session tab.
 
-1. Select the local map if the game server accepts a map path.
-2. Select the dedicated server executable.
-3. Add its documented command-line arguments. Use `{map}` for the selected map path and `{port}` for the configured local port.
-4. Enter the Portwarp tunnel name and click **HOST GAME**.
-5. Copy the public hostname and port from the Portwarp dashboard into VZ's public address field.
-6. Click **Create / refresh invite** and share the resulting VZ1 code with friends.
-7. Click **STOP GAME** to stop the server and ask Portwarp to stop the tunnel.
+Oracle lists Always Free compute resources and up to 10 TB/month outbound
+transfer. A card may be required at signup; regional capacity is not
+guaranteed. Review current limits:
+https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier_topic-Always_Free_Resources.htm
 
-## Joining
+## Host a tunnel
 
-1. Paste the host's VZ1 invite code.
-2. Select the matching game client executable.
-3. Set its documented arguments, using `{host}` and `{port}` for the endpoint.
-4. Click **JOIN GAME**.
+1. Start a compatible local server/service on your PC.
+2. In VZ, select TCP, UDP or both and enter that server's local port.
+3. Paste the private Porthole relay code.
+4. Click START HOST TUNNEL and wait for the live public endpoint.
+5. Share the VZ2_ invite with friends. Never share the porthole1_ code.
 
-## Important compatibility and security limits
+Porthole assigns a public port from the relay's configured allocation range.
+VZ displays it only after the Porthole client confirms the tunnel is live.
 
-- Portwarp is a network tunnel, not a game server, matchmaking service, or game engine.
-- This app does not include a Roblox-compatible runtime or dedicated Roblox place server. A `.rbxl` / `.rbxlx` file cannot be executed by this app as a standalone multiplayer server. The existing Studio plugin can still be used for local Studio testing/import workflows, but it does not make remote Internet gameplay work.
-- For Roblox multiplayer, a compatible server/runtime and network protocol integration are still required. The generic server/client launcher only works with a game that provides its own compatible dedicated server and client executables.
-- VZ1 invites encode the public endpoint and a checksum. They are shareable convenience codes, **not authentication or access-control tokens**. Do not expose an unauthenticated game server; configure access control in the game server itself.
-- The Portwarp endpoint is copied manually from the dashboard in this version. VZ does not yet discover public endpoints automatically.
-- TCP/UDP protocol and local port must match the game server and the Portwarp dashboard tunnel. VZ does not transparently convert protocols.
-- End-to-end tunnel and multiplayer tests require a real Portwarp account, a configured tunnel, and a compatible dedicated server/client.
+## Join
 
-## Build
+Paste a VZ2_ invite in Join Session to decode and display its public endpoint.
+The remote game client must support connecting directly to that hostname and
+port. VZ does not proxy or patch an arbitrary game client's network stack.
 
-GitHub Actions builds the self-contained Windows x64 executable on pushes to `vz-neptunnel-dotnet`. The artifact is named `VZ-NepTunnel-Windows-x64`.
+## Roblox compatibility
+
+VZ opens the local place in Studio and can tunnel a raw TCP/UDP listener. It
+does not upload or publish the place. A tunnel cannot make an unsupported
+Roblox Studio local-test protocol accept remote Roblox Player connections.
+This build does not claim otherwise and does not install a Studio plugin.
+
+## Security
+
+- Keep the porthole1_ relay code private; it includes a shared secret and TLS
+  certificate fingerprint.
+- Share only the VZ2_ public endpoint invite.
+- The VZ invite is an endpoint descriptor, not per-player authentication.
+  Configure access control in the game/server itself.
+- Tunnel data encryption can be enabled in the Host Session tab.
+- Keep Porthole's local status API bound to loopback.
+
+## Source and build
+
+Porthole source/license: https://github.com/sudo-ds/porthole
+VZ source: https://github.com/RVVZBRO/windowsvps/tree/vz-neptunnel-dotnet
+GitHub Actions builds the Windows ZIP on pushes to vz-neptunnel-dotnet.
