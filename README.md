@@ -1,47 +1,53 @@
-# VZ Direct Multiplayer
+# VZ — Shared Relay Multiplayer
 
-VZ is a Windows x64 desktop app for opening a local Roblox place file and
-starting an unpublished Roblox Studio test session that friends can join by
-entering a public address/port and a session ID.
+VZ is a Windows x64 desktop app for starting an experimental unpublished
+Roblox Studio test session and letting friends join through one shared UDP
+relay. Players use only VZ and Roblox Studio; they do not install a tunnel
+program or create a cloud account.
 
-## How it works
+## Player experience
 
-1. Choose a local .rbxl or .rbxlx file and click **HOST SESSION**.
-2. VZ opens the place in Studio and launches the Studio StartServer test process.
-3. VZ creates a token-protected UDP bridge and asks the home router to expose it
-   using UPnP. It then displays the public IPv4 address and UDP port.
-4. Share that address and the generated 32-character session ID with friends.
-5. Friends enter the address and session ID in **JOIN SESSION**. VZ starts a
-   local UDP proxy and launches the Studio StartClient process.
+**Host:** choose a local `.rbxl` / `.rbxlx` file, click **HOST SESSION**, and
+share the generated `VZ4_` invite.
 
-Friends do not need the host's map file, Porthole, an Oracle account, or a
-separate tunnel program. The host place is not uploaded or published.
+**Join:** paste the invite in **JOIN SESSION** and click **JOIN SESSION**.
 
-## Free direct-hosting requirement
+The host's map is not uploaded or published. Friends do not need their own
+copy of the map.
 
-This build uses direct router port mapping. It only works when the host's
-router supports and allows UPnP and the ISP provides a publicly reachable IPv4
-address. Some ISPs use Carrier-Grade NAT (CGNAT), and some routers disable
-UPnP. In those cases, a direct incoming connection cannot be established.
+## Architecture
 
-Bypassing CGNAT requires an internet-reachable relay server. Such a relay needs
-a real machine and bandwidth somewhere; VZ cannot create free public compute
-or bandwidth by itself. This build deliberately reports a direct-connect
-failure instead of inventing a fake tunnel address.
+- One owner-operated public UDP relay listens on UDP 45000.
+- VZ discovers the public relay endpoint from `relay/endpoint.txt`.
+- Hosts register rooms using a random room ID and a separate host secret.
+- Each joiner registers a random client ID and client key.
+- Session UDP payloads are protected using AES-256-GCM between the host and
+  joiner; the relay only routes the encrypted datagrams.
+- Rooms expire after the host stops heartbeats. Inactive joiners expire too.
+- The relay limits simultaneous rooms and joiners per room.
 
-## Source files
+## One-time owner deployment
 
-- Windows app: `VZNepTunnel/Program.cs`
-- UPnP router mapping: `VZNepTunnel/UpnpPortMapping.cs`
-- Token UDP bridge: `VZNepTunnel/StudioSessionUdpProxy.cs`
-- Quick start: `DIRECT-HOSTING.txt`
+See `deploy/oracle/README.txt`. Recommended free-tier machine is Oracle
+Cloud `VM.Standard.A1.Flex` (up to 2 OCPUs and 12 GB RAM in Always Free
+quota, subject to availability). The Go relay compiles natively on ARM64.
+The smaller AMD `VM.Standard.E2.1.Micro` is also supported.
 
-The Studio launch flow is based on the open-source
-[Roblox Studio Bridge](https://github.com/skja67/robloxstudio-bridge) project.
+After deploying the VM and opening UDP 45000 in the Oracle VCN/NSG firewall,
+set `relay/endpoint.txt` to `PUBLIC_IPV4:45000`. VZ clients fetch that value
+automatically; players never configure a relay address.
 
-## Compatibility
+## Source
 
-This is an experimental unpublished Studio test path using Studio's
-StartServer/StartClient process flags. It is not official Roblox Player
-matchmaking. Roblox may change these internal startup flags or networking
-behavior. The host must keep VZ and the Studio test server running.
+- Windows app + UDP client: `VZNepTunnel/Program.cs`
+- Go relay: `relay/main.go`
+- Oracle installer: `deploy/oracle/setup-vz-relay.sh`
+- Owner instructions: `deploy/oracle/README.txt`
+
+## Compatibility notes
+
+The multiplayer startup uses Roblox Studio's unpublished `StartServer` and
+`StartClient` process flags, based on community reference projects. This is
+not official Roblox Player matchmaking. Internal flags and network behavior
+may change between Studio versions. Build success does not prove that a
+two-PC remote session works; that still requires a live test with two PCs.
