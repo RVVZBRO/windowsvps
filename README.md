@@ -1,53 +1,62 @@
-# VZ — Shared Relay Multiplayer
+# VZ — Direct Studio Test Hosting
 
-VZ is a Windows x64 desktop app for starting an experimental unpublished
-Roblox Studio test session and letting friends join through one shared UDP
-relay. Players use only VZ and Roblox Studio; they do not install a tunnel
-program or create a cloud account.
+VZ is a Windows x64 application for starting an unpublished Roblox Studio
+test session from a local .rbxl or .rbxlx file.
 
-## Player experience
+## Host flow
 
-**Host:** choose a local `.rbxl` / `.rbxlx` file, click **HOST SESSION**, and
-share the generated `VZ4_` invite.
+1. Select the local place file.
+2. Click HOST SESSION.
+3. VZ launches Roblox Studio's StartServer task with the selected file
+   passed via -localPlaceFile.
+4. VZ starts a separate StartClient process on the host PC so the host
+   can play too.
+5. VZ starts an authenticated UDP gateway on local port 55556.
+6. VZ asks Windows Firewall to allow that UDP port (one-time UAC approval),
+   then requests a temporary UDP port mapping from the router using UPnP IGD.
+7. The host receives a VZ5_ invite containing the public IPv4/port, a
+   random room ID and an AES-256 key.
 
-**Join:** paste the invite in **JOIN SESSION** and click **JOIN SESSION**.
+## Join flow
 
-The host's map is not uploaded or published. Friends do not need their own
-copy of the map.
+A joining PC pastes the VZ5_ invite. VZ binds a local UDP proxy on
+127.0.0.1:55555, sends an authenticated keepalive to the host and launches
+Studio's StartClient process against that local proxy.
 
-## Architecture
+The host gateway allocates a separate UDP socket for each client so the
+Studio server sees independent client endpoints and replies return to the
+correct player. Tunnel payloads are authenticated and encrypted using
+AES-256-GCM. Session keys are generated randomly for each room.
 
-- One owner-operated public UDP relay listens on UDP 45000.
-- VZ discovers the public relay endpoint from `relay/endpoint.txt`.
-- Hosts register rooms using a random room ID and a separate host secret.
-- Each joiner registers a random client ID and client key.
-- Session UDP payloads are protected using AES-256-GCM between the host and
-  joiner; the relay only routes the encrypted datagrams.
-- Rooms expire after the host stops heartbeats. Inactive joiners expire too.
-- The relay limits simultaneous rooms and joiners per room.
+## Network requirements and limitations
 
-## One-time owner deployment
+This build uses automatic direct UDP port mapping, not a cloud relay.
+The host router must support and allow UPnP IGD, and the ISP connection must
+have a public IPv4 address. Carrier-grade NAT (CGNAT), double NAT or disabled
+UPnP prevents direct remote hosting. The app keeps the local Studio
+playtest running and reports the network limitation instead of closing it.
 
-See `deploy/oracle/README.txt`. Recommended free-tier machine is Oracle
-Cloud `VM.Standard.A1.Flex` (up to 2 OCPUs and 12 GB RAM in Always Free
-quota, subject to availability). The Go relay compiles natively on ARM64.
-The smaller AMD `VM.Standard.E2.1.Micro` is also supported.
+The VZ invite embeds the host's public IPv4 endpoint; only send it to people
+you trust. The session key is a bearer secret. The router mapping and
+gateway port are removed when the host stops VZ.
 
-After deploying the VM and opening UDP 45000 in the Oracle VCN/NSG firewall,
-set `relay/endpoint.txt` to `PUBLIC_IPV4:45000`. VZ clients fetch that value
-automatically; players never configure a relay address.
+No Oracle VM, tunnel account, Porthole/OpenPort install, map upload or
+publishing is required for this direct mode. A relay that works through
+CGNAT still requires a public server someone operates or a third-party
+tunnel provider; this package does not claim otherwise.
 
-## Source
+## Files
 
-- Windows app + UDP client: `VZNepTunnel/Program.cs`
-- Go relay: `relay/main.go`
-- Oracle installer: `deploy/oracle/setup-vz-relay.sh`
-- Owner instructions: `deploy/oracle/README.txt`
+- VZNepTunnel/Program.cs: VZ interface, Studio process launch, encrypted
+  multi-client UDP gateway and join proxy.
+- VZNepTunnel/UpnpPortMapping.cs: UPnP IGD discovery, UDP mapping and
+  cleanup.
+- DIRECT-HOSTING.txt: quick-start instructions.
 
-## Compatibility notes
+## Compatibility
 
-The multiplayer startup uses Roblox Studio's unpublished `StartServer` and
-`StartClient` process flags, based on community reference projects. This is
-not official Roblox Player matchmaking. Internal flags and network behavior
-may change between Studio versions. Build success does not prove that a
-two-PC remote session works; that still requires a live test with two PCs.
+VZ uses Roblox Studio's unpublished StartServer / StartClient process
+tasks. This is an experimental Studio test pathway, not official Roblox
+Player matchmaking. Internal flags and networking behavior may change
+between Studio releases. A successful compile does not prove a remote
+two-PC Studio session; this still needs a live test on two networks.
