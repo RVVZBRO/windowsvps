@@ -1,4 +1,4 @@
-name: Build VZ NepTunnel
+name: Build VZ Tunnel Windows x64
 on:
   push:
     branches: [vz-neptunnel-dotnet]
@@ -9,15 +9,43 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - name: Checkout VZ
+        uses: actions/checkout@v4
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
-      - name: Publish self-contained Windows executable
-        run: dotnet publish VZNepTunnel/VZNepTunnel.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish
-      - uses: actions/upload-artifact@v4
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
-          name: VZ-NepTunnel-Windows-x64
-          path: publish/VZ NepTunnel.exe
+          targets: x86_64-pc-windows-msvc
+      - name: Checkout Porthole tunnel engine
+        uses: actions/checkout@v4
+        with:
+          repository: sudo-ds/porthole
+          path: porthole-src
+      - name: Build Porthole (MIT)
+        working-directory: porthole-src
+        run: cargo build --locked --release --bin porthole
+      - name: Publish VZ self-contained Windows application
+        run: dotnet publish VZNepTunnel/VZNepTunnel.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish
+      - name: Bundle Porthole tunnel executable and relay setup
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path publish/tools | Out-Null
+          New-Item -ItemType Directory -Force -Path publish/deploy/oracle | Out-Null
+          Copy-Item porthole-src/target/release/porthole.exe publish/tools/porthole.exe
+          Copy-Item deploy/oracle/setup-vz-relay.sh publish/deploy/oracle/
+          Copy-Item deploy/oracle/README.txt publish/deploy/oracle/
+          if (!(Test-Path publish/VZ.exe)) { throw "VZ.exe was not generated." }
+          if (!(Test-Path publish/tools/porthole.exe)) { throw "Porthole executable was not bundled." }
+      - name: Create portable ZIP
+        shell: pwsh
+        run: Compress-Archive -Path publish/* -DestinationPath VZ-Tunnel-Windows-x64.zip -CompressionLevel Optimal
+      - name: Upload portable VZ build
+        uses: actions/upload-artifact@v4
+        with:
+          name: VZ-Tunnel-Windows-x64
+          path: VZ-Tunnel-Windows-x64.zip
           if-no-files-found: error
           retention-days: 30
