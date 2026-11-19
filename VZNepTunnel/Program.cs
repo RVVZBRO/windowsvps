@@ -87,14 +87,14 @@ internal sealed class MainForm : Form
         var p = Page("Studio Host");
         var flow = new FlowLayoutPanel { Dock = DockStyle.Top, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Padding = new Padding(8) };
         flow.Controls.Add(Heading("VZ  //  ROBLOX STUDIO HOST"));
-        flow.Controls.Add(new Label { Text = "Choose your Roblox place file. VZ installs its Studio plugin, opens the map in Roblox Studio, and starts a local multiplayer test.", AutoSize = true, MaximumSize = new Size(780,0) });
+        flow.Controls.Add(new Label { Text = "Choose a .rbxl or .rbxlx place. VZ installs its Studio plugin and opens the map in Roblox Studio. Start a local multiplayer test from the VZ toolbar.", AutoSize = true, MaximumSize = new Size(780,0) });
         flow.Controls.Add(Btn("CHOOSE .RBXL / .RBXLX FILE", () => ChooseMap()));
         flow.Controls.Add(selectedMapLabel);
         flow.Controls.Add(Btn("OPEN MAP IN ROBLOX STUDIO", () => LaunchMapInStudio()));
         flow.Controls.Add(Btn("START STUDIO TEST SESSION", () => StartHost()));
         flow.Controls.Add(hostStatus);
-        flow.Controls.Add(new Label { Text = "What this does: Studio runs one local test server plus simulated player clients (up to 8). It is useful for testing your map and multiplayer scripts.", AutoSize = true, MaximumSize = new Size(780,0), ForeColor = Color.LightGreen, Margin = new Padding(0,12,0,0) });
-        flow.Controls.Add(new Label { Text = "Important: Studio's test server is local to your computer. It does not create a public Roblox server, and a VZ invite code cannot make remote friends join that local test. For Internet play, the place must be published and players must join through Roblox's own game servers.", AutoSize = true, MaximumSize = new Size(780,0), ForeColor = Color.Khaki, Margin = new Padding(0,8,0,0) });
+        flow.Controls.Add(new Label { Text = "Local test sizes: 1, 2, 4 or 8 simulated clients. VZ uses Roblox Studio’s official StudioTestService plugin API.", AutoSize = true, MaximumSize = new Size(780,0), ForeColor = Color.LightGreen, Margin = new Padding(0,12,0,0) });
+        flow.Controls.Add(new Label { Text = "Internet play is separate: publish the experience and share its Roblox game link. Studio test sessions are local simulations; Portwarp cannot convert them into public Roblox servers.", AutoSize = true, MaximumSize = new Size(780,0), ForeColor = Color.Khaki, Margin = new Padding(0,8,0,0) });
         p.Controls.Add(flow);
         return p;
     }
@@ -450,7 +450,7 @@ internal sealed class MainForm : Form
             using var output = File.Create(target);
             resource.CopyTo(output);
             Log("Installed Roblox Studio plugin: " + target);
-            MessageBox.Show("VZ Studio host plugin installed. If Roblox Studio is already open, close and reopen it. Then open Plugins > VZ NepTunnel > Start local client session.");
+            MessageBox.Show("VZ Studio test plugin installed. If Roblox Studio is already open, close and reopen it. Then open Plugins > VZ NepTunnel and choose VZTest1, VZTest2, VZTest4 or VZTest8.");
         }
         catch (Exception ex) { MessageBox.Show(ex.Message, "Plugin installation"); }
     }
@@ -487,7 +487,7 @@ internal sealed class MainForm : Form
             Log("VZ Studio plugin installed. Opening the selected local place.");
             LaunchMapInStudio();
             MessageBox.Show(
-                "Your local place is opening in Roblox Studio.\n\nIn Studio, click Plugins > VZ NepTunnel > Start local client session. This starts one local server and one playable client window.\n\nThis is Studio's local multiplayer test; it does not yet allow friends over the Internet.",
+                "Your local place is opening in Roblox Studio.\n\nIn Studio, click Plugins > VZ NepTunnel > VZTest2 (or choose 1, 4 or 8 clients). Studio starts one local server and the selected number of simulated clients.\n\nThis is Studio's local multiplayer test; it does not yet allow friends over the Internet.",
                 "VZ NepTunnel — Start client session");
         }
         catch (Exception ex)
